@@ -70,7 +70,16 @@ def classify_path(path: Path, *, is_executable: bool) -> Evidence | None:
 
 
 def infer_family(evidence: list[Evidence]) -> str:
-    """Infer a best-effort runtime family from evidence hints."""
+    """Infer a best-effort runtime family from evidence hints.
+
+    Engine/framework evidence is more authoritative than generic helper app names:
+    Chrome, Edge, Brave, and Electron apps all have helper apps, but their engine
+    framework names identify the actual family.
+    """
+    engine_hints = [item.family_hint for item in evidence if item.category == "engine" and item.family_hint]
+    if engine_hints:
+        return Counter(engine_hints).most_common(1)[0][0]
+
     hints = [item.family_hint for item in evidence if item.family_hint]
     if not hints:
         return "chromium"

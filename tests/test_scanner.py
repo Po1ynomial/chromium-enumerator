@@ -70,6 +70,18 @@ def test_detects_qtwebengine_app_as_high_confidence_runtime(tmp_path):
     assert result.confidence == "high"
 
 
+def test_browser_framework_family_outranks_helper_app_hint(tmp_path):
+    app = make_app_bundle(tmp_path, "Google Chrome")
+    make_file(app / "Contents" / "Frameworks" / "Google Chrome Framework.framework" / "Google Chrome Framework", executable=True)
+    make_file(app / "Contents" / "Frameworks" / "Google Chrome Framework.framework" / "Resources" / "icudtl.dat")
+    make_file(app / "Contents" / "Frameworks" / "Google Chrome Helper.app" / "Contents" / "MacOS" / "Google Chrome Helper", executable=True)
+    make_file(app / "Contents" / "Frameworks" / "Google Chrome Helper (Renderer).app" / "Contents" / "MacOS" / "Google Chrome Helper (Renderer)", executable=True)
+
+    [result] = ChromiumScanner().scan([tmp_path])
+
+    assert result.family == "chrome"
+
+
 def test_groups_nested_helper_app_under_outer_app(tmp_path):
     app = make_app_bundle(tmp_path, "Outer")
     helper_app = app / "Contents" / "Frameworks" / "Outer Helper.app"
