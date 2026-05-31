@@ -155,6 +155,23 @@ def test_follow_symlinks_applies_to_evidence_entrypoints_and_size(tmp_path):
     assert result.size_bytes > 0
 
 
+def test_follow_symlinks_skips_directory_cycles(tmp_path):
+    runtime = tmp_path / "cef-runtime"
+    make_file(runtime / "bin" / "cefhost", executable=True)
+    make_file(runtime / "lib" / "libcef.dylib")
+    make_file(runtime / "Resources" / "icudtl.dat")
+    (runtime / "loop").symlink_to(runtime, target_is_directory=True)
+
+    [result] = ChromiumScanner(follow_symlinks=True).scan([runtime])
+
+    assert result.root == runtime
+    assert result.confidence == "high"
+    assert result.entrypoints == [runtime / "bin" / "cefhost"]
+    assert result.size_bytes == 3
+    assert all("loop" not in path.parts for path in result.entrypoints)
+    assert all("loop" not in evidence.path.parts for evidence in result.evidence)
+
+
 def test_groups_flat_cef_runtime_directory(tmp_path):
     runtime = tmp_path / "cef-runtime"
     make_file(runtime / "cefhost", executable=True)

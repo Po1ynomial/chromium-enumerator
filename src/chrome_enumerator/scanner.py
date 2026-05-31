@@ -54,6 +54,7 @@ class ChromiumScanner:
         root_evidence = classify_path(root, is_executable=_is_executable(root))
         if root_evidence is not None:
             yield root_evidence
+        visited_dirs = _initial_visited_dirs(root)
 
         for current_dir, dir_names, file_names in os.walk(
             root,
@@ -65,8 +66,7 @@ class ChromiumScanner:
             if self.max_depth is not None and _depth_from(root, current) >= self.max_depth:
                 dir_names[:] = []
 
-            if not self.follow_symlinks:
-                dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
+            _filter_walk_dirs(current, dir_names, follow_symlinks=self.follow_symlinks, visited_dirs=visited_dirs)
 
             for dir_name in list(dir_names):
                 path = current / dir_name
@@ -159,6 +159,7 @@ def _find_entrypoints(root: Path, *, max_depth: int | None = None, follow_symlin
         return [root] if _is_executable(root) else []
 
     entrypoints: list[Path] = []
+    visited_dirs = _initial_visited_dirs(root)
     for current_dir, dir_names, file_names in os.walk(
         root,
         topdown=True,
@@ -171,8 +172,7 @@ def _find_entrypoints(root: Path, *, max_depth: int | None = None, follow_symlin
             dir_names[:] = []
             continue
 
-        if not follow_symlinks:
-            dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
+        _filter_walk_dirs(current, dir_names, follow_symlinks=follow_symlinks, visited_dirs=visited_dirs)
         for file_name in file_names:
             path = current / file_name
             if path.is_symlink() and (not follow_symlinks or not path.exists()):
@@ -182,6 +182,38 @@ def _find_entrypoints(root: Path, *, max_depth: int | None = None, follow_symlin
             if _is_executable(path):
                 entrypoints.append(path)
     return entrypoints
+
+
+def _initial_visited_dirs(root: Path) -> set[tuple[int, int]]:
+    try:
+        stat_result = root.stat()
+    except OSError:
+        return set()
+    return {(stat_result.st_dev, stat_result.st_ino)} if root.is_dir() else set()
+
+
+def _filter_walk_dirs(
+    current: Path,
+    dir_names: list[str],
+    *,
+    follow_symlinks: bool,
+    visited_dirs: set[tuple[int, int]],
+) -> None:
+    kept: list[str] = []
+    for dir_name in dir_names:
+        path = current / dir_name
+        if path.is_symlink() and (not follow_symlinks or not path.exists()):
+            continue
+        try:
+            stat_result = path.stat()
+        except OSError:
+            continue
+        key = (stat_result.st_dev, stat_result.st_ino)
+        if key in visited_dirs:
+            continue
+        visited_dirs.add(key)
+        kept.append(dir_name)
+    dir_names[:] = kept
 
 
 def _is_executable(path: Path) -> bool:
@@ -236,6 +268,7 @@ def _size_bytes(root: Path, *, follow_symlinks: bool = False) -> int:
             return 0
 
     total = 0
+    visited_dirs = _initial_visited_dirs(root)
     for current_dir, dir_names, file_names in os.walk(
         root,
         topdown=True,
@@ -243,8 +276,7 @@ def _size_bytes(root: Path, *, follow_symlinks: bool = False) -> int:
         onerror=lambda _error: None,
     ):
         current = Path(current_dir)
-        if not follow_symlinks:
-            dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
+        _filter_walk_dirs(current, dir_names, follow_symlinks=follow_symlinks, visited_dirs=visited_dirs)
         for file_name in file_names:
             path = current / file_name
             if path.is_symlink() and (not follow_symlinks or not path.exists()):
