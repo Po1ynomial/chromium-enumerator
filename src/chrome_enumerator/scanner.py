@@ -40,6 +40,8 @@ class ChromiumScanner:
 
         for root_value in roots:
             root = Path(root_value).expanduser()
+            if root.is_symlink() and not root.exists():
+                continue
             if not root.exists():
                 self.warnings.append(f"missing root: {root}")
                 continue

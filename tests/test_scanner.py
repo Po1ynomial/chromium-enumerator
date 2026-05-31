@@ -189,6 +189,15 @@ def test_symlink_root_requires_follow_symlinks_and_preserves_root_path(tmp_path)
     assert link / "bin" / "cefhost" in result.entrypoints
 
 
+def test_broken_symlink_root_is_ignored_without_warning(tmp_path):
+    broken = tmp_path / "broken-root"
+    broken.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+    scanner = ChromiumScanner()
+
+    assert scanner.scan([broken]) == []
+    assert scanner.warnings == []
+
+
 def test_warnings_are_cleared_between_scans(tmp_path):
     scanner = ChromiumScanner()
 
