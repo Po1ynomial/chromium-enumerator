@@ -88,6 +88,41 @@ def test_excludes_isolated_resource_files_by_default(tmp_path):
     assert ChromiumScanner().scan([tmp_path]) == []
 
 
+def test_ignores_broken_symlink_file_evidence(tmp_path):
+    app = make_app_bundle(tmp_path, "BrokenLinkHost")
+    make_file(app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Electron Framework", executable=True)
+    (app / "Contents" / "Frameworks" / "chrome_crashpad_handler").symlink_to(tmp_path / "missing-handler")
+
+    assert ChromiumScanner().scan([tmp_path]) == []
+
+
+def test_detects_standalone_framework_runtime(tmp_path):
+    framework = tmp_path / "Chromium Embedded Framework.framework"
+    make_file(framework / "Chromium Embedded Framework", executable=True)
+    make_file(framework / "Resources" / "icudtl.dat")
+
+    [result] = ChromiumScanner().scan([tmp_path])
+
+    assert result.root == framework
+    assert result.family == "cef"
+    assert result.confidence == "high"
+    assert framework / "Chromium Embedded Framework" in result.entrypoints
+
+
+def test_groups_flat_cef_runtime_directory(tmp_path):
+    runtime = tmp_path / "cef-runtime"
+    make_file(runtime / "cefhost", executable=True)
+    make_file(runtime / "lib" / "libcef.dylib")
+    make_file(runtime / "Resources" / "icudtl.dat")
+
+    [result] = ChromiumScanner().scan([tmp_path])
+
+    assert result.root == runtime
+    assert result.family == "cef"
+    assert result.confidence == "high"
+    assert runtime / "cefhost" in result.entrypoints
+
+
 def test_can_limit_scan_depth(tmp_path):
     app = make_app_bundle(tmp_path / "too" / "deep", "Deep")
     make_file(app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Resources" / "icudtl.dat")

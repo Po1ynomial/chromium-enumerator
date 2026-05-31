@@ -60,6 +60,9 @@ def classify_path(path: Path, *, is_executable: bool) -> Evidence | None:
     if name.endswith(" Helper.app") or " Helper (" in name and name.endswith(").app"):
         return Evidence("helper", path, "Helper.app", "electron")
 
+    if is_executable and _is_framework_executable(path):
+        return Evidence("executable", path, "framework executable")
+
     if is_executable and _is_contents_macos_path(path):
         return Evidence("executable", path, "Contents/MacOS executable")
 
@@ -83,3 +86,10 @@ def _family_hint_from_resource(name: str) -> str | None:
 def _is_contents_macos_path(path: Path) -> bool:
     parts = path.parts
     return len(parts) >= 3 and parts[-3] == "Contents" and parts[-2] == "MacOS"
+
+
+def _is_framework_executable(path: Path) -> bool:
+    for parent in path.parents:
+        if parent.name.endswith(".framework"):
+            return path.name == parent.stem
+    return False

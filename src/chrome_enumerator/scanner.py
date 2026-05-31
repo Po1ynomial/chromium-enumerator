@@ -73,6 +73,8 @@ class ChromiumScanner:
 
             for file_name in file_names:
                 path = current / file_name
+                if path.is_symlink() and (not self.follow_symlinks or not path.exists()):
+                    continue
                 evidence = classify_path(path, is_executable=_is_executable(path))
                 if evidence is not None:
                     yield evidence
@@ -82,11 +84,14 @@ class ChromiumScanner:
 
     def _build_result(self, root: Path, evidence: list[Evidence]) -> RuntimeResult:
         unique_evidence = _dedupe_evidence(evidence)
-        confidence = _score_confidence(unique_evidence)
         entrypoints = sorted(
-            {item.path for item in unique_evidence if item.category == "executable" or _is_executable(item.path)},
+            {
+                *[item.path for item in unique_evidence if item.category == "executable" or _is_executable(item.path)],
+                *_find_entrypoints(root),
+            },
             key=str,
         )
+        confidence = _score_confidence(unique_evidence, entrypoints)
         return RuntimeResult(
             root=root,
             family=infer_family(unique_evidence),
@@ -106,12 +111,12 @@ class ChromiumScanner:
         if framework_root is not None:
             return framework_root
 
-        return path.parent if path.is_file() else path
+        return _flat_runtime_root_for(path)
 
 
-def _score_confidence(evidence: list[Evidence]) -> Confidence:
+def _score_confidence(evidence: list[Evidence], entrypoints: list[Path]) -> Confidence:
     categories = {item.category for item in evidence}
-    has_executable = "executable" in categories or any(_is_executable(item.path) for item in evidence)
+    has_executable = "executable" in categories or bool(entrypoints) or any(_is_executable(item.path) for item in evidence)
     has_engine = "engine" in categories
     has_resource = "resource" in categories
     has_helper = "helper" in categories
@@ -131,6 +136,36 @@ def _outermost_bundle(path: Path, suffix: Literal[".app", ".framework"]) -> Path
     if not candidates:
         return None
     return min(candidates, key=lambda candidate: len(candidate.parts))
+
+
+def _flat_runtime_root_for(path: Path) -> Path:
+    if path.name == "libcef.dylib" and path.parent.name in {"lib", "Frameworks", "Libraries"}:
+        return path.parent.parent
+
+    if path.parent.name == "Resources":
+        return path.parent.parent
+
+    if path.parent.name == "locales" and path.parent.parent.name == "Resources":
+        return path.parent.parent.parent
+
+    return path.parent if path.is_file() else path
+
+
+def _find_entrypoints(root: Path) -> list[Path]:
+    if root.is_file():
+        return [root] if _is_executable(root) else []
+
+    entrypoints: list[Path] = []
+    for current_dir, dir_names, file_names in os.walk(root, topdown=True, onerror=lambda _error: None):
+        current = Path(current_dir)
+        dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
+        for file_name in file_names:
+            path = current / file_name
+            if path.is_symlink() or path.suffix in {".dylib", ".so"}:
+                continue
+            if _is_executable(path):
+                entrypoints.append(path)
+    return entrypoints
 
 
 def _is_executable(path: Path) -> bool:
