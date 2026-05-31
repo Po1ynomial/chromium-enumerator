@@ -5,7 +5,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from chrome_enumerator.scanner import ChromiumScanner
+from .scanner import ChromiumScanner
 
 _DEFAULT_ROOTS = ("/Applications", "~/Applications", "/opt/homebrew", "/usr/local")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from chrome_enumerator.model import Evidence
+from .model import Evidence
 
 ENGINE_NAMES: dict[str, str] = {
     "Electron Framework.framework": "electron",

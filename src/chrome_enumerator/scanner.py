@@ -8,8 +8,8 @@ from pathlib import Path
 from stat import S_IXGRP, S_IXOTH, S_IXUSR
 from typing import Literal
 
-from chrome_enumerator.detectors import classify_path, infer_family
-from chrome_enumerator.model import Confidence, Evidence, RuntimeResult
+from .detectors import classify_path, infer_family
+from .model import Confidence, Evidence, RuntimeResult
 
 _ALLOWED_METADATA_KEYS = (
     "CFBundleName",

@@ -1,7 +1,7 @@
 [project]
 name = "chrome-enumerator"
 version = "0.1.0"
-description = "Add your description here"
+description = "Static macOS scanner for probable runnable Chromium-family runtime cores"
 authors = [
     { name = "Po1ynomial", email = "polynomial1@foxmail.com" }
 ]
