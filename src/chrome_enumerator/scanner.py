@@ -35,12 +35,16 @@ class ChromiumScanner:
         self.warnings: list[str] = []
 
     def scan(self, roots: Iterable[Path | str]) -> list[RuntimeResult]:
+        self.warnings.clear()
         grouped: dict[Path, list[Evidence]] = defaultdict(list)
 
         for root_value in roots:
             root = Path(root_value).expanduser()
             if not root.exists():
                 self.warnings.append(f"missing root: {root}")
+                continue
+            if root.is_symlink() and not self.follow_symlinks:
+                self.warnings.append(f"skipped symlink root: {root}")
                 continue
             for evidence in self._walk_evidence(root):
                 grouped[self._runtime_root_for(evidence.path)].append(evidence)
@@ -50,7 +54,6 @@ class ChromiumScanner:
         return sorted(filtered, key=lambda result: str(result.root))
 
     def _walk_evidence(self, root: Path) -> Iterable[Evidence]:
-        root = root.resolve(strict=False)
         root_evidence = classify_path(root, is_executable=_is_executable(root))
         if root_evidence is not None:
             yield root_evidence

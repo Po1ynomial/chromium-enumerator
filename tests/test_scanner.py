@@ -172,6 +172,33 @@ def test_follow_symlinks_skips_directory_cycles(tmp_path):
     assert all("loop" not in evidence.path.parts for evidence in result.evidence)
 
 
+def test_symlink_root_requires_follow_symlinks_and_preserves_root_path(tmp_path):
+    real = tmp_path / "real-cef"
+    make_file(real / "bin" / "cefhost", executable=True)
+    make_file(real / "lib" / "libcef.dylib")
+    make_file(real / "Resources" / "icudtl.dat")
+    link = tmp_path / "linked-cef"
+    link.symlink_to(real, target_is_directory=True)
+
+    assert ChromiumScanner().scan([link]) == []
+
+    [result] = ChromiumScanner(follow_symlinks=True).scan([link])
+
+    assert result.root == link
+    assert result.confidence == "high"
+    assert link / "bin" / "cefhost" in result.entrypoints
+
+
+def test_warnings_are_cleared_between_scans(tmp_path):
+    scanner = ChromiumScanner()
+
+    scanner.scan([tmp_path / "missing"])
+    assert scanner.warnings
+
+    scanner.scan([tmp_path])
+    assert scanner.warnings == []
+
+
 def test_groups_flat_cef_runtime_directory(tmp_path):
     runtime = tmp_path / "cef-runtime"
     make_file(runtime / "cefhost", executable=True)
