@@ -58,7 +58,7 @@ def classify_path(path: Path, *, is_executable: bool) -> Evidence | None:
         return Evidence("helper", path, name, "qtwebengine" if name.startswith("QtWebEngine") else None)
 
     if name.endswith(" Helper.app") or " Helper (" in name and name.endswith(").app"):
-        return Evidence("helper", path, "Helper.app", "electron")
+        return Evidence("helper", path, "Helper.app")
 
     if is_executable and _is_framework_executable(path):
         return Evidence("executable", path, "framework executable")

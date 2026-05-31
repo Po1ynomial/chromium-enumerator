@@ -87,7 +87,7 @@ class ChromiumScanner:
         entrypoints = sorted(
             {
                 *[item.path for item in unique_evidence if item.category == "executable" or _is_executable(item.path)],
-                *_find_entrypoints(root),
+                *_find_entrypoints(root, max_depth=self.max_depth),
             },
             key=str,
         )
@@ -151,13 +151,18 @@ def _flat_runtime_root_for(path: Path) -> Path:
     return path.parent if path.is_file() else path
 
 
-def _find_entrypoints(root: Path) -> list[Path]:
+def _find_entrypoints(root: Path, *, max_depth: int | None = None) -> list[Path]:
     if root.is_file():
         return [root] if _is_executable(root) else []
 
     entrypoints: list[Path] = []
     for current_dir, dir_names, file_names in os.walk(root, topdown=True, onerror=lambda _error: None):
         current = Path(current_dir)
+        current_depth = _depth_from(root, current)
+        if max_depth is not None and current_depth >= max_depth:
+            dir_names[:] = []
+            continue
+
         dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
         for file_name in file_names:
             path = current / file_name

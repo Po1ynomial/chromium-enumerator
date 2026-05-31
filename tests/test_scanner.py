@@ -135,6 +135,38 @@ def test_groups_flat_cef_runtime_directory(tmp_path):
     assert runtime / "cefhost" in result.entrypoints
 
 
+def test_groups_flat_cef_runtime_with_bin_launcher(tmp_path):
+    runtime = tmp_path / "cef-runtime"
+    make_file(runtime / "bin" / "cefhost", executable=True)
+    make_file(runtime / "lib" / "libcef.dylib")
+    make_file(runtime / "Resources" / "icudtl.dat")
+
+    [result] = ChromiumScanner().scan([tmp_path])
+
+    assert result.root == runtime
+    assert result.confidence == "high"
+    assert runtime / "bin" / "cefhost" in result.entrypoints
+
+
+def test_max_depth_limits_entrypoint_discovery(tmp_path):
+    runtime = tmp_path / "cef-runtime"
+    make_file(runtime / "bin" / "deep" / "cefhost", executable=True)
+    make_file(runtime / "lib" / "libcef.dylib")
+    make_file(runtime / "Resources" / "icudtl.dat")
+
+    assert ChromiumScanner(max_depth=2).scan([tmp_path]) == []
+
+
+def test_helper_app_hint_is_neutral_without_engine_evidence(tmp_path):
+    app = make_app_bundle(tmp_path, "HelperOnly")
+    make_file(app / "Contents" / "Frameworks" / "HelperOnly Helper.app" / "Contents" / "MacOS" / "HelperOnly Helper", executable=True)
+
+    [result] = ChromiumScanner(include_low_confidence=True).scan([tmp_path])
+
+    assert result.confidence == "low"
+    assert result.family == "chromium"
+
+
 def test_can_limit_scan_depth(tmp_path):
     app = make_app_bundle(tmp_path / "too" / "deep", "Deep")
     make_file(app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Resources" / "icudtl.dat")
