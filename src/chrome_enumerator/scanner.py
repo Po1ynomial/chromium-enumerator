@@ -51,6 +51,9 @@ class ChromiumScanner:
 
     def _walk_evidence(self, root: Path) -> Iterable[Evidence]:
         root = root.resolve(strict=False)
+        root_evidence = classify_path(root, is_executable=_is_executable(root))
+        if root_evidence is not None:
+            yield root_evidence
 
         for current_dir, dir_names, file_names in os.walk(
             root,
@@ -87,7 +90,7 @@ class ChromiumScanner:
         entrypoints = sorted(
             {
                 *[item.path for item in unique_evidence if item.category == "executable" or _is_executable(item.path)],
-                *_find_entrypoints(root, max_depth=self.max_depth),
+                *_find_entrypoints(root, max_depth=self.max_depth, follow_symlinks=self.follow_symlinks),
             },
             key=str,
         )
@@ -99,7 +102,7 @@ class ChromiumScanner:
             evidence=sorted(unique_evidence, key=lambda item: (item.category, str(item.path))),
             entrypoints=entrypoints,
             metadata=_read_metadata(root),
-            size_bytes=_size_bytes(root),
+            size_bytes=_size_bytes(root, follow_symlinks=self.follow_symlinks),
         )
 
     def _runtime_root_for(self, path: Path) -> Path:
@@ -151,22 +154,30 @@ def _flat_runtime_root_for(path: Path) -> Path:
     return path.parent if path.is_file() else path
 
 
-def _find_entrypoints(root: Path, *, max_depth: int | None = None) -> list[Path]:
+def _find_entrypoints(root: Path, *, max_depth: int | None = None, follow_symlinks: bool = False) -> list[Path]:
     if root.is_file():
         return [root] if _is_executable(root) else []
 
     entrypoints: list[Path] = []
-    for current_dir, dir_names, file_names in os.walk(root, topdown=True, onerror=lambda _error: None):
+    for current_dir, dir_names, file_names in os.walk(
+        root,
+        topdown=True,
+        followlinks=follow_symlinks,
+        onerror=lambda _error: None,
+    ):
         current = Path(current_dir)
         current_depth = _depth_from(root, current)
         if max_depth is not None and current_depth >= max_depth:
             dir_names[:] = []
             continue
 
-        dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
+        if not follow_symlinks:
+            dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
         for file_name in file_names:
             path = current / file_name
-            if path.is_symlink() or path.suffix in {".dylib", ".so"}:
+            if path.is_symlink() and (not follow_symlinks or not path.exists()):
+                continue
+            if path.suffix in {".dylib", ".so"}:
                 continue
             if _is_executable(path):
                 entrypoints.append(path)
@@ -217,7 +228,7 @@ def _read_metadata(root: Path) -> dict[str, str]:
     return metadata
 
 
-def _size_bytes(root: Path) -> int:
+def _size_bytes(root: Path, *, follow_symlinks: bool = False) -> int:
     if root.is_file():
         try:
             return root.stat().st_size
@@ -225,12 +236,18 @@ def _size_bytes(root: Path) -> int:
             return 0
 
     total = 0
-    for current_dir, dir_names, file_names in os.walk(root, topdown=True, onerror=lambda _error: None):
+    for current_dir, dir_names, file_names in os.walk(
+        root,
+        topdown=True,
+        followlinks=follow_symlinks,
+        onerror=lambda _error: None,
+    ):
         current = Path(current_dir)
-        dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
+        if not follow_symlinks:
+            dir_names[:] = [name for name in dir_names if not (current / name).is_symlink()]
         for file_name in file_names:
             path = current / file_name
-            if path.is_symlink():
+            if path.is_symlink() and (not follow_symlinks or not path.exists()):
                 continue
             try:
                 total += path.stat().st_size

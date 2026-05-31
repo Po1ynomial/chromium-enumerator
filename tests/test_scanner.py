@@ -121,6 +121,40 @@ def test_detects_standalone_framework_runtime(tmp_path):
     assert framework / "Chromium Embedded Framework" in result.entrypoints
 
 
+def test_detects_standalone_framework_when_root_is_framework(tmp_path):
+    framework = tmp_path / "Chromium Embedded Framework.framework"
+    make_file(framework / "Chromium Embedded Framework", executable=True)
+    make_file(framework / "Resources" / "icudtl.dat")
+
+    [result] = ChromiumScanner().scan([framework])
+
+    assert result.root == framework
+    assert result.family == "cef"
+    assert result.confidence == "high"
+
+
+def test_follow_symlinks_applies_to_evidence_entrypoints_and_size(tmp_path):
+    real = tmp_path / "real-cef"
+    make_file(real / "bin" / "cefhost", executable=True)
+    make_file(real / "lib" / "libcef.dylib")
+    make_file(real / "Resources" / "icudtl.dat")
+
+    runtime = tmp_path / "linked-cef"
+    runtime.mkdir()
+    (runtime / "bin").symlink_to(real / "bin", target_is_directory=True)
+    (runtime / "lib").symlink_to(real / "lib", target_is_directory=True)
+    (runtime / "Resources").symlink_to(real / "Resources", target_is_directory=True)
+
+    assert ChromiumScanner().scan([runtime]) == []
+
+    [result] = ChromiumScanner(follow_symlinks=True).scan([runtime])
+
+    assert result.root == runtime
+    assert result.confidence == "high"
+    assert runtime / "bin" / "cefhost" in result.entrypoints
+    assert result.size_bytes > 0
+
+
 def test_groups_flat_cef_runtime_directory(tmp_path):
     runtime = tmp_path / "cef-runtime"
     make_file(runtime / "cefhost", executable=True)
