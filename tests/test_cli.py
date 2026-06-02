@@ -15,8 +15,24 @@ def make_file(path: Path, content: bytes = b"x", *, executable: bool = False) ->
 def make_electron_app(root: Path) -> Path:
     app = root / "Desk.app"
     make_file(app / "Contents" / "MacOS" / "Desk", executable=True)
-    make_file(app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Resources" / "icudtl.dat")
-    make_file(app / "Contents" / "Frameworks" / "Desk Helper.app" / "Contents" / "MacOS" / "Desk Helper", executable=True)
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Desk Helper.app"
+        / "Contents"
+        / "MacOS"
+        / "Desk Helper",
+        executable=True,
+    )
     return app
 
 
@@ -40,10 +56,25 @@ def test_cli_outputs_human_readable_summary(tmp_path, capsys):
 
     assert exit_code == 0
     output = capsys.readouterr().out
+    assert "Found 1 probable Chromium runtime" in output
+    assert "electron: 1" in output
+    assert "Desk.app — Electron, high confidence" in output
     assert str(app) in output
-    assert "family: electron" in output
-    assert "confidence: high" in output
+    assert "evidence:" not in output
+    assert "entrypoints:" not in output
+
+
+def test_cli_verbose_output_includes_identified_files(tmp_path, capsys):
+    app = make_electron_app(tmp_path)
+
+    exit_code = main(["--verbose", str(tmp_path)])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert str(app) in output
     assert "evidence:" in output
+    assert "entrypoints:" in output
+    assert "Electron Framework.framework" in output
 
 
 def test_cli_can_include_low_confidence_candidates(tmp_path, capsys):

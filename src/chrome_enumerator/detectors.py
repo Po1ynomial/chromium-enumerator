@@ -55,7 +55,12 @@ def classify_path(path: Path, *, is_executable: bool) -> Evidence | None:
         return Evidence("resource", path, "locale pak")
 
     if name in HELPER_NAMES:
-        return Evidence("helper", path, name, "qtwebengine" if name.startswith("QtWebEngine") else None)
+        return Evidence(
+            "helper",
+            path,
+            name,
+            "qtwebengine" if name.startswith("QtWebEngine") else None,
+        )
 
     if name.endswith(" Helper.app") or " Helper (" in name and name.endswith(").app"):
         return Evidence("helper", path, "Helper.app")
@@ -76,7 +81,11 @@ def infer_family(evidence: list[Evidence]) -> str:
     Chrome, Edge, Brave, and Electron apps all have helper apps, but their engine
     framework names identify the actual family.
     """
-    engine_hints = [item.family_hint for item in evidence if item.category == "engine" and item.family_hint]
+    engine_hints = [
+        item.family_hint
+        for item in evidence
+        if item.category == "engine" and item.family_hint
+    ]
     if engine_hints:
         return Counter(engine_hints).most_common(1)[0][0]
 

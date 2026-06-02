@@ -12,7 +12,15 @@ It is designed for the “how many Chromes are on this machine?” question: Ele
 uv run chrome-enumerator /Applications ~/Applications
 ```
 
-Emit JSON:
+The default human-readable output summarizes counts by family and lists each probable runtime without dumping every matched file.
+
+Show detailed evidence files and entrypoints:
+
+```sh
+uv run chrome-enumerator --verbose /Applications
+```
+
+Emit full structured JSON:
 
 ```sh
 uv run chrome-enumerator --json /Applications /opt/homebrew
@@ -73,6 +81,12 @@ Show CLI help:
 
 ```sh
 uv run chrome-enumerator --help
+```
+
+Inspect why a runtime was identified:
+
+```sh
+uv run chrome-enumerator --verbose /Applications
 ```
 
 Scan default macOS roots:
