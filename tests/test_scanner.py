@@ -300,6 +300,28 @@ def test_broken_symlink_root_is_ignored_without_warning(tmp_path):
     assert scanner.warnings == []
 
 
+def test_build_result_walks_root_at_most_once(tmp_path, monkeypatch):
+    import os as os_module
+
+    app = make_app_bundle(tmp_path, "WalkApp")
+    make_file(app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Resources" / "icudtl.dat")
+    make_file(app / "Contents" / "Frameworks" / "WalkApp Helper.app" / "Contents" / "MacOS" / "WalkApp Helper", executable=True)
+
+    calls = []
+    original_walk = os_module.walk
+
+    def counting_walk(*args, **kwargs):
+        calls.append(1)
+        yield from original_walk(*args, **kwargs)
+
+    monkeypatch.setattr(os_module, "walk", counting_walk)
+    [result] = ChromiumScanner().scan([tmp_path])
+
+    assert result.entrypoints
+    assert result.size_bytes > 0
+    assert len(calls) <= 2
+
+
 def test_warnings_are_cleared_between_scans(tmp_path):
     scanner = ChromiumScanner()
 

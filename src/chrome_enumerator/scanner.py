@@ -4,6 +4,7 @@ import os
 import plistlib
 from collections import defaultdict
 from collections.abc import Iterable
+from contextlib import suppress as _suppress
 from pathlib import Path
 from stat import S_IXGRP, S_IXOTH, S_IXUSR
 from typing import Literal
@@ -108,6 +109,9 @@ class ChromiumScanner:
 
     def _build_result(self, root: Path, evidence: list[Evidence]) -> RuntimeResult:
         unique_evidence = _dedupe_evidence(evidence)
+        extra_entrypoints, extra_size = _walk_runtime_extras(
+            root, max_depth=self.max_depth, follow_symlinks=self.follow_symlinks
+        )
         entrypoints = sorted(
             {
                 *[
@@ -115,9 +119,7 @@ class ChromiumScanner:
                     for item in unique_evidence
                     if item.category == "executable" or _is_executable(item.path)
                 ],
-                *_find_entrypoints(
-                    root, max_depth=self.max_depth, follow_symlinks=self.follow_symlinks
-                ),
+                *extra_entrypoints,
             },
             key=str,
         )
@@ -131,7 +133,7 @@ class ChromiumScanner:
             ),
             entrypoints=entrypoints,
             metadata=_read_metadata(root),
-            size_bytes=_size_bytes(root, follow_symlinks=self.follow_symlinks),
+            size_bytes=extra_size,
         )
 
     def _runtime_root_for(self, path: Path) -> Path:
@@ -198,10 +200,26 @@ def _flat_runtime_root_for(path: Path) -> Path:
 def _find_entrypoints(
     root: Path, *, max_depth: int | None = None, follow_symlinks: bool = False
 ) -> list[Path]:
+    """Legacy single-purpose entrypoint walk kept for external callers."""
+    return _walk_runtime_extras(root, max_depth=max_depth, follow_symlinks=follow_symlinks)[0]
+
+
+def _size_bytes(root: Path, *, follow_symlinks: bool = False) -> int:
+    """Legacy single-purpose size walk kept for external callers."""
+    return _walk_runtime_extras(root, max_depth=None, follow_symlinks=follow_symlinks)[1]
+
+
+def _walk_runtime_extras(
+    root: Path, *, max_depth: int | None = None, follow_symlinks: bool = False
+) -> tuple[list[Path], int]:
     if root.is_file():
-        return [root] if _is_executable(root) else []
+        size = 0
+        with _suppress(OSError):
+            size = root.stat().st_size
+        return [root] if _is_executable(root) else [], size
 
     entrypoints: list[Path] = []
+    total_size = 0
     visited_dirs = _initial_visited_dirs(root)
     for current_dir, dir_names, file_names in os.walk(
         root,
@@ -225,11 +243,15 @@ def _find_entrypoints(
             path = current / file_name
             if path.is_symlink() and (not follow_symlinks or not path.exists()):
                 continue
+            try:
+                total_size += path.stat().st_size
+            except OSError:
+                pass
             if path.suffix in {".dylib", ".so"}:
                 continue
             if _is_executable(path):
                 entrypoints.append(path)
-    return entrypoints
+    return entrypoints, total_size
 
 
 def _initial_visited_dirs(root: Path) -> set[tuple[int, int]]:
@@ -297,7 +319,7 @@ def _read_metadata(root: Path) -> dict[str, str]:
     try:
         with info_plist.open("rb") as plist_file:
             data = plistlib.load(plist_file)
-    except (OSError, plistlib.InvalidFileException, ValueError):
+    except OSError, plistlib.InvalidFileException, ValueError:
         return {}
 
     metadata: dict[str, str] = {}
@@ -306,36 +328,3 @@ def _read_metadata(root: Path) -> dict[str, str]:
         if isinstance(value, str):
             metadata[key] = value
     return metadata
-
-
-def _size_bytes(root: Path, *, follow_symlinks: bool = False) -> int:
-    if root.is_file():
-        try:
-            return root.stat().st_size
-        except OSError:
-            return 0
-
-    total = 0
-    visited_dirs = _initial_visited_dirs(root)
-    for current_dir, dir_names, file_names in os.walk(
-        root,
-        topdown=True,
-        followlinks=follow_symlinks,
-        onerror=lambda _error: None,
-    ):
-        current = Path(current_dir)
-        _filter_walk_dirs(
-            current,
-            dir_names,
-            follow_symlinks=follow_symlinks,
-            visited_dirs=visited_dirs,
-        )
-        for file_name in file_names:
-            path = current / file_name
-            if path.is_symlink() and (not follow_symlinks or not path.exists()):
-                continue
-            try:
-                total += path.stat().st_size
-            except OSError:
-                continue
-    return total
