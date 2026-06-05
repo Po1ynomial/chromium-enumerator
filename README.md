@@ -50,11 +50,15 @@ A high-confidence result usually has:
 
 Single isolated files are not counted by default because they are not enough to prove a directly runnable Chromium core.
 
+The scanner prefers native traversal tools for broad scans: `fd` when available, then macOS `find`, with Python `os.walk` only as a final fallback. `fd` is invoked unrestricted so hidden files and gitignored paths are still considered; `find` also includes those paths by default. Spotlight/`mdfind` is not used as authoritative input because indexed search can omit files.
+
 ## Confidence Levels
 
-- `high`: executable + engine + resource/helper evidence.
+- `high`: executable + engine + resource/helper evidence, with a plausible runtime payload size.
 - `medium`: executable + at least two secondary evidence categories.
-- `low`: weak clusters, only shown with `--include-low-confidence`.
+- `low`: weak clusters or exceptionally tiny realistic-looking layouts, only shown with `--include-low-confidence`.
+
+Tiny app/test fixture layouts are demoted to `low` instead of hard-excluded, so `--include-low-confidence` and `--json` can still show them when needed.
 
 ## Project Structure
 
@@ -102,3 +106,4 @@ uv run chrome-enumerator
 - Does not yet extract Chromium versions from binary strings.
 - Targets macOS filesystem layouts.
 - Static detection can still produce false positives or miss heavily customized runtimes.
+- Exceptionally small candidates are treated as likely fixtures/incomplete leftovers and demoted to low confidence.

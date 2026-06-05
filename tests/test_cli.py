@@ -4,6 +4,9 @@ from pathlib import Path
 from chrome_enumerator.cli import main
 
 
+LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
+
+
 def make_file(path: Path, content: bytes = b"x", *, executable: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -12,9 +15,18 @@ def make_file(path: Path, content: bytes = b"x", *, executable: bool = False) ->
     return path
 
 
+def make_large_payload(root: Path) -> Path:
+    payload = root / "Contents" / "Resources" / "large-runtime-payload.bin"
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    with payload.open("wb") as payload_file:
+        payload_file.truncate(LARGE_RUNTIME_BYTES)
+    return payload
+
+
 def make_electron_app(root: Path) -> Path:
     app = root / "Desk.app"
     make_file(app / "Contents" / "MacOS" / "Desk", executable=True)
+    make_large_payload(app)
     make_file(
         app
         / "Contents"

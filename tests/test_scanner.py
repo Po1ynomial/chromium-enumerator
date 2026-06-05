@@ -4,6 +4,9 @@ from pathlib import Path
 from chrome_enumerator.scanner import ChromiumScanner
 
 
+LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
+
+
 def make_file(path: Path, content: bytes = b"x", *, executable: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -12,9 +15,18 @@ def make_file(path: Path, content: bytes = b"x", *, executable: bool = False) ->
     return path
 
 
+def make_large_payload(root: Path) -> Path:
+    payload = root / "Contents" / "Resources" / "large-runtime-payload.bin"
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    with payload.open("wb") as payload_file:
+        payload_file.truncate(LARGE_RUNTIME_BYTES)
+    return payload
+
+
 def make_app_bundle(root: Path, name: str) -> Path:
     app = root / f"{name}.app"
     make_file(app / "Contents" / "MacOS" / name, executable=True)
+    make_large_payload(app)
     plist = {
         "CFBundleName": name,
         "CFBundleIdentifier": f"com.example.{name.lower()}",
@@ -214,6 +226,7 @@ def test_detects_standalone_framework_runtime(tmp_path):
     framework = tmp_path / "Chromium Embedded Framework.framework"
     make_file(framework / "Chromium Embedded Framework", executable=True)
     make_file(framework / "Resources" / "icudtl.dat")
+    make_large_payload(framework)
 
     [result] = ChromiumScanner().scan([tmp_path])
 
@@ -227,6 +240,7 @@ def test_detects_standalone_framework_when_root_is_framework(tmp_path):
     framework = tmp_path / "Chromium Embedded Framework.framework"
     make_file(framework / "Chromium Embedded Framework", executable=True)
     make_file(framework / "Resources" / "icudtl.dat")
+    make_large_payload(framework)
 
     [result] = ChromiumScanner().scan([framework])
 
@@ -304,8 +318,24 @@ def test_build_result_walks_root_at_most_once(tmp_path, monkeypatch):
     import os as os_module
 
     app = make_app_bundle(tmp_path, "WalkApp")
-    make_file(app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Resources" / "icudtl.dat")
-    make_file(app / "Contents" / "Frameworks" / "WalkApp Helper.app" / "Contents" / "MacOS" / "WalkApp Helper", executable=True)
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "WalkApp Helper.app"
+        / "Contents"
+        / "MacOS"
+        / "WalkApp Helper",
+        executable=True,
+    )
 
     calls = []
     original_walk = os_module.walk
@@ -337,6 +367,7 @@ def test_groups_flat_cef_runtime_directory(tmp_path):
     make_file(runtime / "cefhost", executable=True)
     make_file(runtime / "lib" / "libcef.dylib")
     make_file(runtime / "Resources" / "icudtl.dat")
+    make_large_payload(runtime)
 
     [result] = ChromiumScanner().scan([tmp_path])
 
@@ -351,6 +382,7 @@ def test_groups_flat_cef_runtime_with_bin_launcher(tmp_path):
     make_file(runtime / "bin" / "cefhost", executable=True)
     make_file(runtime / "lib" / "libcef.dylib")
     make_file(runtime / "Resources" / "icudtl.dat")
+    make_large_payload(runtime)
 
     [result] = ChromiumScanner().scan([tmp_path])
 
@@ -399,3 +431,95 @@ def test_can_limit_scan_depth(tmp_path):
     )
 
     assert ChromiumScanner(max_depth=1).scan([tmp_path]) == []
+
+
+def test_small_realistic_layout_is_demoted_to_low_confidence(tmp_path):
+    app = tmp_path / "TinyFixture.app"
+    make_file(app / "Contents" / "MacOS" / "TinyFixture", executable=True)
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "TinyFixture Helper.app"
+        / "Contents"
+        / "MacOS"
+        / "TinyFixture Helper",
+        executable=True,
+    )
+
+    assert ChromiumScanner().scan([tmp_path]) == []
+
+    [result] = ChromiumScanner(include_low_confidence=True).scan([tmp_path])
+    assert result.confidence == "low"
+
+
+def test_hidden_and_gitignored_candidates_are_not_omitted(tmp_path):
+    (tmp_path / ".gitignore").write_text("ignored/\n")
+    app = make_app_bundle(tmp_path / ".hidden" / "ignored", "HiddenDesk")
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "HiddenDesk Helper.app"
+        / "Contents"
+        / "MacOS"
+        / "HiddenDesk Helper",
+        executable=True,
+    )
+
+    [result] = ChromiumScanner().scan([tmp_path])
+    assert result.root == app
+
+
+def test_external_traversal_backend_avoids_os_walk(tmp_path, monkeypatch):
+    import os as os_module
+    import shutil
+
+    import chrome_enumerator.scanner as scanner_module
+
+    app = make_app_bundle(tmp_path, "ExternalDesk")
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+    all_paths = list(tmp_path.rglob("*"))
+    original_which = shutil.which
+
+    def fake_which(name):
+        return "/usr/bin/fd" if name == "fd" else original_which(name)
+
+    def fake_iter_command_paths(command, on_error):
+        root = Path(command[-1])
+        for path in all_paths:
+            if path.is_relative_to(root):
+                yield path
+
+    def failing_walk(*args, **kwargs):
+        raise AssertionError("os.walk fallback should not be used when fd is available")
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setattr(scanner_module, "_iter_command_paths", fake_iter_command_paths)
+    monkeypatch.setattr(os_module, "walk", failing_walk)
+
+    [result] = ChromiumScanner().scan([tmp_path])
+    assert result.root == app
