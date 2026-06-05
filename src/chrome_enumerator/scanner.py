@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -12,10 +13,28 @@ from pathlib import Path
 from stat import S_IXGRP, S_IXOTH, S_IXUSR
 from typing import Literal
 
-from .detectors import classify_path, infer_family
+from .detectors import (
+    ENGINE_NAMES,
+    HELPER_NAMES,
+    RESOURCE_NAMES,
+    classify_path,
+    infer_family,
+)
 from .model import Confidence, Evidence, RuntimeResult
 
 _EXCEPTIONALLY_SMALL_RUNTIME_BYTES = 5 * 1024 * 1024
+
+_SEED_EXACT_NAMES = frozenset(ENGINE_NAMES) | frozenset(RESOURCE_NAMES) | frozenset(HELPER_NAMES)
+_SEED_FD_REGEX = r"^(" + "|".join(
+    sorted(
+        {
+            *(re.escape(name) for name in _SEED_EXACT_NAMES),
+            r".*\.pak",
+            r".* Helper( \(.+\))?\.app",
+        }
+    )
+) + r")$"
+_SEED_FIND_NAMES = tuple(sorted(_SEED_EXACT_NAMES)) + ("*.pak", "* Helper.app", "* Helper (*).app")
 
 _ALLOWED_METADATA_KEYS = (
     "CFBundleName",
@@ -34,10 +53,12 @@ class ChromiumScanner:
         include_low_confidence: bool = False,
         max_depth: int | None = None,
         follow_symlinks: bool = False,
+        exhaustive: bool = False,
     ) -> None:
         self.include_low_confidence = include_low_confidence
         self.max_depth = max_depth
         self.follow_symlinks = follow_symlinks
+        self.exhaustive = exhaustive
         self.warnings: list[str] = []
 
     def scan(self, roots: Iterable[Path | str]) -> list[RuntimeResult]:
@@ -54,8 +75,13 @@ class ChromiumScanner:
             if root.is_symlink() and not self.follow_symlinks:
                 self.warnings.append(f"skipped symlink root: {root}")
                 continue
-            for evidence in self._walk_evidence(root):
-                grouped[self._runtime_root_for(evidence.path)].append(evidence)
+            if self.exhaustive:
+                for evidence in self._walk_evidence_exhaustive(root):
+                    grouped[self._runtime_root_for(evidence.path)].append(evidence)
+            else:
+                for candidate_root in self._candidate_roots_from_seeds(root):
+                    for evidence in self._walk_evidence_exhaustive(candidate_root):
+                        grouped[candidate_root].append(evidence)
 
         results = [
             self._build_result(root, evidence) for root, evidence in grouped.items()
@@ -67,12 +93,34 @@ class ChromiumScanner:
         ]
         return sorted(filtered, key=lambda result: str(result.root))
 
-    def _walk_evidence(self, root: Path) -> Iterable[Evidence]:
+    def _candidate_roots_from_seeds(self, root: Path) -> list[Path]:
+        candidates = {
+            self._runtime_root_for(evidence.path)
+            for evidence in self._walk_seed_evidence(root)
+        }
+        return sorted(candidates, key=str)
+
+    def _walk_seed_evidence(self, root: Path) -> Iterable[Evidence]:
         root_evidence = classify_path(root, is_executable=_is_executable(root))
         if root_evidence is not None:
             yield root_evidence
 
-        for path in _iter_traversal_paths(
+        for path in _iter_seed_paths(
+            root,
+            max_depth=self.max_depth,
+            follow_symlinks=self.follow_symlinks,
+            on_error=self.warnings.append,
+        ):
+            evidence = classify_path(path, is_executable=_is_executable(path))
+            if evidence is not None:
+                yield evidence
+
+    def _walk_evidence_exhaustive(self, root: Path) -> Iterable[Evidence]:
+        root_evidence = classify_path(root, is_executable=_is_executable(root))
+        if root_evidence is not None:
+            yield root_evidence
+
+        for path in _iter_os_walk_paths(
             root,
             max_depth=self.max_depth,
             follow_symlinks=self.follow_symlinks,
@@ -219,7 +267,7 @@ def _walk_runtime_extras(
 
     entrypoints: list[Path] = []
     total_size = 0
-    for path in _iter_traversal_paths(
+    for path in _iter_os_walk_paths(
         root,
         max_depth=max_depth,
         follow_symlinks=follow_symlinks,
@@ -235,24 +283,17 @@ def _walk_runtime_extras(
     return entrypoints, total_size
 
 
-def _iter_traversal_paths(
+def _iter_seed_paths(
     root: Path,
     *,
     max_depth: int | None,
     follow_symlinks: bool,
-    files_only: bool,
     on_error: Callable[[str], None],
 ) -> Iterator[Path]:
-    command = _fd_command(
-        root,
-        max_depth=max_depth,
-        follow_symlinks=follow_symlinks,
-        files_only=files_only,
-    ) or _find_command(
-        root,
-        max_depth=max_depth,
-        follow_symlinks=follow_symlinks,
-        files_only=files_only,
+    command = _fd_seed_command(
+        root, max_depth=max_depth, follow_symlinks=follow_symlinks
+    ) or _find_seed_command(
+        root, max_depth=max_depth, follow_symlinks=follow_symlinks
     )
 
     if command is not None:
@@ -262,7 +303,7 @@ def _iter_traversal_paths(
             root,
             max_depth=max_depth,
             follow_symlinks=follow_symlinks,
-            files_only=files_only,
+            files_only=False,
             on_error=on_error,
         )
 
@@ -273,38 +314,28 @@ def _iter_traversal_paths(
         if _should_skip_symlink(path, follow_symlinks=follow_symlinks):
             continue
         if not _within_scan_depth(
-            root, path, max_depth=max_depth, files_only=files_only
+            root, path, max_depth=max_depth, files_only=False
         ):
             continue
         yield path
 
 
-def _fd_command(
-    root: Path,
-    *,
-    max_depth: int | None,
-    follow_symlinks: bool,
-    files_only: bool,
+def _fd_seed_command(
+    root: Path, *, max_depth: int | None, follow_symlinks: bool
 ) -> list[str] | None:
     executable = shutil.which("fd") or shutil.which("fdfind")
     if executable is None or follow_symlinks:
         return None
 
     command = [executable, "-u", "--absolute-path", "-0"]
-    if files_only:
-        command.extend(["--type", "file"])
     if max_depth is not None:
         command.extend(["--max-depth", str(max_depth + 1)])
-    command.extend([".", str(root)])
+    command.extend([_SEED_FD_REGEX, str(root)])
     return command
 
 
-def _find_command(
-    root: Path,
-    *,
-    max_depth: int | None,
-    follow_symlinks: bool,
-    files_only: bool,
+def _find_seed_command(
+    root: Path, *, max_depth: int | None, follow_symlinks: bool
 ) -> list[str] | None:
     executable = shutil.which("find")
     if executable is None:
@@ -313,9 +344,12 @@ def _find_command(
     command = [executable, "-L" if follow_symlinks else "-P", str(root)]
     if max_depth is not None:
         command.extend(["-maxdepth", str(max_depth + 1)])
-    if files_only:
-        command.extend(["-type", "f"])
-    command.append("-print0")
+    command.append("(")
+    for index, name in enumerate(_SEED_FIND_NAMES):
+        if index:
+            command.append("-o")
+        command.extend(["-name", name])
+    command.extend([")", "-print0"])
     return command
 
 
@@ -376,6 +410,8 @@ def _iter_os_walk_paths(
         current = Path(current_dir)
         if max_depth is not None and _depth_from(root, current) >= max_depth:
             dir_names[:] = []
+            if files_only:
+                continue
 
         _filter_walk_dirs(
             current,
@@ -389,7 +425,10 @@ def _iter_os_walk_paths(
                 yield current / dir_name
 
         for file_name in file_names:
-            yield current / file_name
+            path = current / file_name
+            if _should_skip_symlink(path, follow_symlinks=follow_symlinks):
+                continue
+            yield path
 
 
 def _normalize_external_path(root: Path, path: Path) -> Path:

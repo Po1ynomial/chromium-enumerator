@@ -23,6 +23,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_low_confidence=args.include_low_confidence,
         max_depth=args.max_depth,
         follow_symlinks=args.follow_symlinks,
+        exhaustive=args.exhaustive,
     )
     results = scanner.scan(roots)
 
@@ -148,5 +149,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--follow-symlinks",
         action="store_true",
         help="Follow directory symlinks while scanning.",
+    )
+    parser.add_argument(
+        "--exhaustive",
+        action="store_true",
+        help="Use full Python os.walk traversal instead of default targeted seed search.",
     )
     return parser

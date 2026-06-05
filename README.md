@@ -38,6 +38,12 @@ Limit recursion depth:
 uv run chrome-enumerator --max-depth 6 /Applications
 ```
 
+Force an exhaustive Python `os.walk` scan instead of the default direct search:
+
+```sh
+uv run chrome-enumerator --exhaustive /Applications
+```
+
 ## How Detection Works
 
 Chromium does not have one universal static signature. This scanner uses evidence clusters instead.
@@ -50,7 +56,9 @@ A high-confidence result usually has:
 
 Single isolated files are not counted by default because they are not enough to prove a directly runnable Chromium core.
 
-The scanner prefers native traversal tools for broad scans: `fd` when available, then macOS `find`, with Python `os.walk` only as a final fallback. `fd` is invoked unrestricted so hidden files and gitignored paths are still considered; `find` also includes those paths by default. Spotlight/`mdfind` is not used as authoritative input because indexed search can omit files.
+By default, the scanner uses native tools only for direct seed discovery: it asks `fd` when available, then macOS `find`, to locate known Chromium target filenames such as framework bundles, `libcef.dylib`, `.pak` resources, crashpad handlers, and helper apps. It then merges those seed paths into probable runtime roots and verifies each candidate root with Python traversal. This avoids streaming every filesystem entry through a subprocess while still narrowing full inspection to likely candidates.
+
+Use `--exhaustive` to skip seed discovery and scan every path with Python `os.walk`. Hidden files and gitignored paths are considered in both modes: `fd` is invoked unrestricted for seed search, `find` includes those paths by default, and `os.walk` does not consult ignore files. Spotlight/`mdfind` is not used as authoritative input because indexed search can omit files.
 
 ## Confidence Levels
 
@@ -91,6 +99,12 @@ Inspect why a runtime was identified:
 
 ```sh
 uv run chrome-enumerator --verbose /Applications
+```
+
+Run a full exhaustive traversal when validating direct-search results:
+
+```sh
+uv run chrome-enumerator --exhaustive /Applications
 ```
 
 Scan default macOS roots:

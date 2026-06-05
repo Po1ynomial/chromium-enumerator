@@ -487,8 +487,7 @@ def test_hidden_and_gitignored_candidates_are_not_omitted(tmp_path):
     assert result.root == app
 
 
-def test_external_traversal_backend_avoids_os_walk(tmp_path, monkeypatch):
-    import os as os_module
+def test_default_scan_uses_targeted_seed_command(tmp_path, monkeypatch):
     import shutil
 
     import chrome_enumerator.scanner as scanner_module
@@ -503,23 +502,59 @@ def test_external_traversal_backend_avoids_os_walk(tmp_path, monkeypatch):
         / "icudtl.dat"
     )
     all_paths = list(tmp_path.rglob("*"))
+    commands = []
     original_which = shutil.which
 
     def fake_which(name):
         return "/usr/bin/fd" if name == "fd" else original_which(name)
 
     def fake_iter_command_paths(command, on_error):
+        commands.append(command)
         root = Path(command[-1])
         for path in all_paths:
-            if path.is_relative_to(root):
+            if path.is_relative_to(root) and path.name in {
+                "Electron Framework.framework",
+                "icudtl.dat",
+            }:
                 yield path
-
-    def failing_walk(*args, **kwargs):
-        raise AssertionError("os.walk fallback should not be used when fd is available")
 
     monkeypatch.setattr(shutil, "which", fake_which)
     monkeypatch.setattr(scanner_module, "_iter_command_paths", fake_iter_command_paths)
-    monkeypatch.setattr(os_module, "walk", failing_walk)
 
     [result] = ChromiumScanner().scan([tmp_path])
+
+    assert result.root == app
+    assert commands
+    command_text = " ".join(commands[0])
+    assert "Electron" in command_text
+    assert "Framework" in command_text
+    assert "icudtl" in command_text
+    assert "large-runtime-payload" not in command_text
+
+
+def test_exhaustive_scan_uses_os_walk_not_seed_command(tmp_path, monkeypatch):
+    import shutil
+
+    import chrome_enumerator.scanner as scanner_module
+
+    app = make_app_bundle(tmp_path, "ExhaustiveDesk")
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/fd")
+    monkeypatch.setattr(
+        scanner_module,
+        "_iter_command_paths",
+        lambda command, on_error: (_ for _ in ()).throw(
+            AssertionError("exhaustive scan should not use native seed commands")
+        ),
+    )
+
+    [result] = ChromiumScanner(exhaustive=True).scan([tmp_path])
     assert result.root == app

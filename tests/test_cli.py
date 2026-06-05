@@ -98,3 +98,13 @@ def test_cli_can_include_low_confidence_candidates(tmp_path, capsys):
     output = json.loads(capsys.readouterr().out)
     assert len(output) == 1
     assert output[0]["confidence"] == "low"
+
+
+def test_cli_accepts_exhaustive_scan_flag(tmp_path, capsys):
+    app = make_electron_app(tmp_path)
+
+    exit_code = main(["--json", "--exhaustive", str(tmp_path)])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output[0]["root"] == str(app)
