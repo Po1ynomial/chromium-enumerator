@@ -6,42 +6,58 @@
 
 It is designed for the “how many Chromes are on this machine?” question: Electron apps, CEF apps, Chromium-browser-family bundles, QtWebEngine apps, and similar runtimes that carry their own Chromium engine payload.
 
+## Install
+
+Requires Python ≥ 3.14 and either [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/).
+
+```sh
+# with uv (recommended)
+uv tool install git+https://github.com/Po1ynomial/chromium-enumerator
+
+# with pipx
+pipx install git+https://github.com/Po1ynomial/chromium-enumerator
+
+# from a local checkout
+uv tool install /path/to/chromium-enumerator
+pipx install /path/to/chromium-enumerator
+```
+
+After install, `chromium-count` is available on your `$PATH`.
+
 ## Quick Start
 
 ```sh
-uv run chromium-count /Applications ~/Applications
+chromium-count /Applications ~/Applications
 ```
-
-The default human-readable output summarizes counts by family and lists each probable runtime without dumping every matched file.
 
 Show detailed evidence files and entrypoints:
 
 ```sh
-uv run chromium-count --verbose /Applications
+chromium-count --verbose /Applications
 ```
 
 Emit full structured JSON:
 
 ```sh
-uv run chromium-count --json /Applications /opt/homebrew
+chromium-count --json /Applications /opt/homebrew
 ```
 
 Include weak evidence clusters that are normally hidden:
 
 ```sh
-uv run chromium-count --include-low-confidence ~/Downloads
+chromium-count --include-low-confidence ~/Downloads
 ```
 
 Limit recursion depth:
 
 ```sh
-uv run chromium-count --max-depth 6 /Applications
+chromium-count --max-depth 6 /Applications
 ```
 
 Force an exhaustive Python `os.walk` scan instead of the default direct search:
 
 ```sh
-uv run chromium-count --exhaustive /Applications
+chromium-count --exhaustive /Applications
 ```
 
 ## How Detection Works
@@ -92,25 +108,25 @@ uv run pytest -v
 Show CLI help:
 
 ```sh
-uv run chromium-count --help
+chromium-count --help
 ```
 
 Inspect why a runtime was identified:
 
 ```sh
-uv run chromium-count --verbose /Applications
+chromium-count --verbose /Applications
 ```
 
 Run a full exhaustive traversal when validating direct-search results:
 
 ```sh
-uv run chromium-count --exhaustive /Applications
+chromium-count --exhaustive /Applications
 ```
 
 Scan default macOS roots:
 
 ```sh
-uv run chromium-count
+chromium-count
 ```
 
 ## Limitations
