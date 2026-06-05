@@ -1,7 +1,7 @@
 import plistlib
 from pathlib import Path
 
-from chrome_enumerator.scanner import ChromiumScanner
+from chromium_enumerator.scanner import ChromiumScanner
 
 
 LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
@@ -490,7 +490,7 @@ def test_hidden_and_gitignored_candidates_are_not_omitted(tmp_path):
 def test_default_scan_uses_targeted_seed_command(tmp_path, monkeypatch):
     import shutil
 
-    import chrome_enumerator.scanner as scanner_module
+    import chromium_enumerator.scanner as scanner_module
 
     app = make_app_bundle(tmp_path, "ExternalDesk")
     make_file(
@@ -535,7 +535,7 @@ def test_default_scan_uses_targeted_seed_command(tmp_path, monkeypatch):
 def test_exhaustive_scan_uses_os_walk_not_seed_command(tmp_path, monkeypatch):
     import shutil
 
-    import chrome_enumerator.scanner as scanner_module
+    import chromium_enumerator.scanner as scanner_module
 
     app = make_app_bundle(tmp_path, "ExhaustiveDesk")
     make_file(

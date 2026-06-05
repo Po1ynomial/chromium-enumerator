@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from chrome_enumerator.detectors import classify_path, infer_family
+from chromium_enumerator.detectors import classify_path, infer_family
 
 
 def test_classifies_known_engine_frameworks():

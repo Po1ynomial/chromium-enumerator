@@ -116,7 +116,7 @@ def _format_size(size_bytes: int) -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="chrome-enumerator",
+        prog="chromium-count",
         description="Statically enumerate probable runnable Chromium-family runtime cores on macOS.",
     )
     parser.add_argument(

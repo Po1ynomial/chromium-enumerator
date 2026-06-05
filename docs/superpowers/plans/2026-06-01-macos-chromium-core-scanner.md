@@ -12,11 +12,11 @@
 
 ## File Structure
 
-- Create `src/chrome_enumerator/model.py`: `Evidence`, `RuntimeResult`, and JSON conversion helpers.
-- Create `src/chrome_enumerator/detectors.py`: pure functions that classify paths into evidence categories and infer runtime families.
-- Create `src/chrome_enumerator/scanner.py`: `ChromiumScanner` with walking, grouping, scoring, metadata extraction, executable detection, and size calculation.
-- Create `src/chrome_enumerator/cli.py`: argparse command, default roots, text output, and JSON output.
-- Modify `src/chrome_enumerator/__init__.py`: delegate `main()` to `cli.main()`.
+- Create `src/chromium_enumerator/model.py`: `Evidence`, `RuntimeResult`, and JSON conversion helpers.
+- Create `src/chromium_enumerator/detectors.py`: pure functions that classify paths into evidence categories and infer runtime families.
+- Create `src/chromium_enumerator/scanner.py`: `ChromiumScanner` with walking, grouping, scoring, metadata extraction, executable detection, and size calculation.
+- Create `src/chromium_enumerator/cli.py`: argparse command, default roots, text output, and JSON output.
+- Modify `src/chromium_enumerator/__init__.py`: delegate `main()` to `cli.main()`.
 - Create `tests/test_detectors.py`: detector unit tests.
 - Create `tests/test_scanner.py`: scanner behavior tests using fake macOS bundles.
 - Create `tests/test_cli.py`: CLI JSON/text smoke tests.
@@ -25,8 +25,8 @@
 
 **Files:**
 - Create: `tests/test_detectors.py`
-- Create: `src/chrome_enumerator/model.py`
-- Create: `src/chrome_enumerator/detectors.py`
+- Create: `src/chromium_enumerator/model.py`
+- Create: `src/chromium_enumerator/detectors.py`
 
 - [ ] **Step 1: Write failing detector tests**
 
@@ -35,7 +35,7 @@ Create `tests/test_detectors.py` with tests that expect known Chromium-family fi
 - [ ] **Step 2: Run detector tests to verify RED**
 
 Run: `uv run pytest tests/test_detectors.py -v`
-Expected: FAIL because `chrome_enumerator.detectors` does not exist.
+Expected: FAIL because `chromium_enumerator.detectors` does not exist.
 
 - [ ] **Step 3: Implement detector/model code**
 
@@ -50,8 +50,8 @@ Expected: PASS.
 
 **Files:**
 - Create: `tests/test_scanner.py`
-- Create/modify: `src/chrome_enumerator/scanner.py`
-- Modify: `src/chrome_enumerator/model.py`
+- Create/modify: `src/chromium_enumerator/scanner.py`
+- Modify: `src/chromium_enumerator/model.py`
 
 - [ ] **Step 1: Write failing scanner tests**
 
@@ -60,7 +60,7 @@ Create synthetic app bundles under pytest `tmp_path` for Electron, CEF, QtWebEng
 - [ ] **Step 2: Run scanner tests to verify RED**
 
 Run: `uv run pytest tests/test_scanner.py -v`
-Expected: FAIL because `chrome_enumerator.scanner` does not exist.
+Expected: FAIL because `chromium_enumerator.scanner` does not exist.
 
 - [ ] **Step 3: Implement scanner code**
 
@@ -75,8 +75,8 @@ Expected: PASS.
 
 **Files:**
 - Create: `tests/test_cli.py`
-- Create: `src/chrome_enumerator/cli.py`
-- Modify: `src/chrome_enumerator/__init__.py`
+- Create: `src/chromium_enumerator/cli.py`
+- Modify: `src/chromium_enumerator/__init__.py`
 - Modify: `pyproject.toml`
 
 - [ ] **Step 1: Write failing CLI tests**
@@ -116,7 +116,7 @@ Set a useful project description and document usage, detection model, confidence
 Run: `uv run pytest -v`
 Expected: PASS.
 
-Run: `uv run chrome-enumerator --help`
+Run: `uv run chromium-count --help`
 Expected: exit 0 and display CLI options.
 
 ## Plan Self-Review

@@ -56,9 +56,9 @@ This produces runtime-level output rather than raw file hits.
 Command examples:
 
 ```sh
-chrome-enumerator /Applications ~/Applications
-chrome-enumerator --json /Applications /opt/homebrew
-chrome-enumerator --include-low-confidence --max-depth 8 ~/Downloads
+chromium-count /Applications ~/Applications
+chromium-count --json /Applications /opt/homebrew
+chromium-count --include-low-confidence --max-depth 8 ~/Downloads
 ```
 
 Options:
@@ -87,11 +87,11 @@ The implementation is a small Python package using only the standard library at 
 
 Files:
 
-- `src/chrome_enumerator/model.py`: dataclasses and enums for evidence and scan results.
-- `src/chrome_enumerator/detectors.py`: filename/path-based Chromium evidence detection.
-- `src/chrome_enumerator/scanner.py`: filesystem walking, grouping, scoring, metadata extraction, and size calculation.
-- `src/chrome_enumerator/cli.py`: argparse CLI and output formatting.
-- `src/chrome_enumerator/__init__.py`: package entrypoint that delegates to the CLI.
+- `src/chromium_enumerator/model.py`: dataclasses and enums for evidence and scan results.
+- `src/chromium_enumerator/detectors.py`: filename/path-based Chromium evidence detection.
+- `src/chromium_enumerator/scanner.py`: filesystem walking, grouping, scoring, metadata extraction, and size calculation.
+- `src/chromium_enumerator/cli.py`: argparse CLI and output formatting.
+- `src/chromium_enumerator/__init__.py`: package entrypoint that delegates to the CLI.
 - `tests/`: pytest suite using synthetic macOS-style bundles in temporary directories.
 
 ## Error Handling

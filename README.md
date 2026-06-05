@@ -1,15 +1,15 @@
-# chrome-enumerator
+# chromium-enumerator
 
 ## What This Does
 
-`chrome-enumerator` is a macOS-focused CLI that statically scans unpacked filesystem contents for probable runnable Chromium-family runtime cores.
+`chromium-count` is a macOS-focused CLI that statically scans unpacked filesystem contents for probable runnable Chromium-family runtime cores.
 
 It is designed for the “how many Chromes are on this machine?” question: Electron apps, CEF apps, Chromium-browser-family bundles, QtWebEngine apps, and similar runtimes that carry their own Chromium engine payload.
 
 ## Quick Start
 
 ```sh
-uv run chrome-enumerator /Applications ~/Applications
+uv run chromium-count /Applications ~/Applications
 ```
 
 The default human-readable output summarizes counts by family and lists each probable runtime without dumping every matched file.
@@ -17,31 +17,31 @@ The default human-readable output summarizes counts by family and lists each pro
 Show detailed evidence files and entrypoints:
 
 ```sh
-uv run chrome-enumerator --verbose /Applications
+uv run chromium-count --verbose /Applications
 ```
 
 Emit full structured JSON:
 
 ```sh
-uv run chrome-enumerator --json /Applications /opt/homebrew
+uv run chromium-count --json /Applications /opt/homebrew
 ```
 
 Include weak evidence clusters that are normally hidden:
 
 ```sh
-uv run chrome-enumerator --include-low-confidence ~/Downloads
+uv run chromium-count --include-low-confidence ~/Downloads
 ```
 
 Limit recursion depth:
 
 ```sh
-uv run chrome-enumerator --max-depth 6 /Applications
+uv run chromium-count --max-depth 6 /Applications
 ```
 
 Force an exhaustive Python `os.walk` scan instead of the default direct search:
 
 ```sh
-uv run chrome-enumerator --exhaustive /Applications
+uv run chromium-count --exhaustive /Applications
 ```
 
 ## How Detection Works
@@ -71,8 +71,8 @@ Tiny app/test fixture layouts are demoted to `low` instead of hard-excluded, so 
 ## Project Structure
 
 ```text
-chrome-enumerator/
-├── src/chrome_enumerator/
+chromium-enumerator/
+├── src/chromium_enumerator/
 │   ├── cli.py          # argparse CLI and text/JSON formatting
 │   ├── detectors.py    # path/name evidence classification
 │   ├── model.py        # dataclasses for evidence and results
@@ -92,25 +92,25 @@ uv run pytest -v
 Show CLI help:
 
 ```sh
-uv run chrome-enumerator --help
+uv run chromium-count --help
 ```
 
 Inspect why a runtime was identified:
 
 ```sh
-uv run chrome-enumerator --verbose /Applications
+uv run chromium-count --verbose /Applications
 ```
 
 Run a full exhaustive traversal when validating direct-search results:
 
 ```sh
-uv run chrome-enumerator --exhaustive /Applications
+uv run chromium-count --exhaustive /Applications
 ```
 
 Scan default macOS roots:
 
 ```sh
-uv run chrome-enumerator
+uv run chromium-count
 ```
 
 ## Limitations

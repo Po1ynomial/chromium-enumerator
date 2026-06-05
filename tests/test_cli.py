@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from chrome_enumerator.cli import main
+from chromium_enumerator.cli import main
 
 
 LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
