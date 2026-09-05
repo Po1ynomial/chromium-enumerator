@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
 
+from chromium_enumerator.cli import main
 from chromium_enumerator.model import Evidence
 from chromium_enumerator.platforms import WindowsProfile
 from chromium_enumerator.scanner import (
@@ -177,6 +179,22 @@ def test_entrypoints_exclude_payload_dlls(tmp_path):
     [result] = windows_scanner().scan([tmp_path])
 
     assert result.entrypoints == [runtime / "cefapp.exe"]
+
+
+def test_cli_platform_windows_scans_windows_layout(tmp_path, capsys):
+    runtime = tmp_path / "cefapp"
+    make_file(runtime / "cefapp.exe")
+    make_file(runtime / "libcef.dll")
+    make_file(runtime / "icudtl.dat")
+    make_large_payload(runtime)
+
+    exit_code = main(["--platform", "windows", "--json", str(tmp_path)])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output[0]["root"] == str(runtime)
+    assert output[0]["family"] == "cef"
+    assert output[0]["confidence"] == "high"
 
 
 def test_metadata_reads_stub_environment(monkeypatch, tmp_path):
