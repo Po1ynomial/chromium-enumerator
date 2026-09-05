@@ -3,7 +3,6 @@ from pathlib import Path
 
 from chromium_enumerator.scanner import ChromiumScanner
 
-
 LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
 
 

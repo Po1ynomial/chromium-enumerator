@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-EvidenceCategory = Literal["engine", "resource", "helper", "executable"]
+EvidenceCategory = Literal["engine", "electron-marker", "resource", "helper", "executable"]
 Confidence = Literal["high", "medium", "low"]
 
 

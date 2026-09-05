@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import plistlib
-import re
 import shutil
 import subprocess
 import tempfile
@@ -10,40 +8,11 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress as _suppress
 from pathlib import Path
-from stat import S_IXGRP, S_IXOTH, S_IXUSR
-from typing import Literal
 
-from .detectors import (
-    ENGINE_NAMES,
-    HELPER_NAMES,
-    RESOURCE_NAMES,
-    classify_path,
-    infer_family,
-)
 from .model import Confidence, Evidence, RuntimeResult
+from .platforms import PlatformProfile, current_profile, infer_family
 
 _EXCEPTIONALLY_SMALL_RUNTIME_BYTES = 5 * 1024 * 1024
-
-_SEED_EXACT_NAMES = frozenset(ENGINE_NAMES) | frozenset(RESOURCE_NAMES) | frozenset(HELPER_NAMES)
-_SEED_FD_REGEX = r"^(" + "|".join(
-    sorted(
-        {
-            *(re.escape(name) for name in _SEED_EXACT_NAMES),
-            r".*\.pak",
-            r".* Helper( \(.+\))?\.app",
-        }
-    )
-) + r")$"
-_SEED_FIND_NAMES = tuple(sorted(_SEED_EXACT_NAMES)) + ("*.pak", "* Helper.app", "* Helper (*).app")
-
-_ALLOWED_METADATA_KEYS = (
-    "CFBundleName",
-    "CFBundleDisplayName",
-    "CFBundleIdentifier",
-    "CFBundleShortVersionString",
-    "CFBundleVersion",
-    "CFBundleExecutable",
-)
 
 
 class ChromiumScanner:
@@ -54,11 +23,13 @@ class ChromiumScanner:
         max_depth: int | None = None,
         follow_symlinks: bool = False,
         exhaustive: bool = False,
+        profile: PlatformProfile | None = None,
     ) -> None:
         self.include_low_confidence = include_low_confidence
         self.max_depth = max_depth
         self.follow_symlinks = follow_symlinks
         self.exhaustive = exhaustive
+        self.profile = profile if profile is not None else current_profile()
         self.warnings: list[str] = []
 
     def scan(self, roots: Iterable[Path | str]) -> list[RuntimeResult]:
@@ -101,22 +72,23 @@ class ChromiumScanner:
         return sorted(candidates, key=str)
 
     def _walk_seed_evidence(self, root: Path) -> Iterable[Evidence]:
-        root_evidence = classify_path(root, is_executable=_is_executable(root))
+        root_evidence = self.profile.classify_path(root)
         if root_evidence is not None:
             yield root_evidence
 
         for path in _iter_seed_paths(
             root,
+            profile=self.profile,
             max_depth=self.max_depth,
             follow_symlinks=self.follow_symlinks,
             on_error=self.warnings.append,
         ):
-            evidence = classify_path(path, is_executable=_is_executable(path))
+            evidence = self.profile.classify_path(path)
             if evidence is not None:
                 yield evidence
 
     def _walk_evidence_exhaustive(self, root: Path) -> Iterable[Evidence]:
-        root_evidence = classify_path(root, is_executable=_is_executable(root))
+        root_evidence = self.profile.classify_path(root)
         if root_evidence is not None:
             yield root_evidence
 
@@ -127,21 +99,25 @@ class ChromiumScanner:
             files_only=False,
             on_error=self.warnings.append,
         ):
-            evidence = classify_path(path, is_executable=_is_executable(path))
+            evidence = self.profile.classify_path(path)
             if evidence is not None:
                 yield evidence
 
     def _build_result(self, root: Path, evidence: list[Evidence]) -> RuntimeResult:
         unique_evidence = _dedupe_evidence(evidence)
         extra_entrypoints, extra_size = _walk_runtime_extras(
-            root, max_depth=self.max_depth, follow_symlinks=self.follow_symlinks
+            root,
+            profile=self.profile,
+            max_depth=self.max_depth,
+            follow_symlinks=self.follow_symlinks,
         )
         entrypoints = sorted(
             {
                 *[
                     item.path
                     for item in unique_evidence
-                    if item.category == "executable" or _is_executable(item.path)
+                    if item.category == "executable"
+                    or self.profile.is_executable(item.path)
                 ],
                 *extra_entrypoints,
             },
@@ -161,34 +137,23 @@ class ChromiumScanner:
                 unique_evidence, key=lambda item: (item.category, str(item.path))
             ),
             entrypoints=entrypoints,
-            metadata=_read_metadata(root),
+            metadata=self.profile.read_metadata(root),
             size_bytes=extra_size,
         )
 
     def _runtime_root_for(self, path: Path) -> Path:
-        app_root = _outermost_bundle(path, ".app")
-        if app_root is not None:
-            return app_root
-
-        framework_root = _outermost_bundle(path, ".framework")
-        if framework_root is not None:
-            return framework_root
-
-        return _flat_runtime_root_for(path)
+        return self.profile.runtime_root_for(path)
 
 
 def _score_confidence(evidence: list[Evidence], entrypoints: list[Path]) -> Confidence:
     categories = {item.category for item in evidence}
-    has_executable = (
-        "executable" in categories
-        or bool(entrypoints)
-        or any(_is_executable(item.path) for item in evidence)
-    )
-    has_engine = "engine" in categories
+    has_executable = "executable" in categories or bool(entrypoints)
+    marker_count = len({item.path.name for item in evidence if _is_engine_like(item)})
+    has_engine = marker_count > 0
     has_resource = "resource" in categories
     has_helper = "helper" in categories
 
-    if has_executable and has_engine and (has_resource or has_helper):
+    if has_executable and marker_count >= 1 and (has_resource or has_helper):
         return "high"
 
     secondary_count = sum([has_engine, has_resource, has_helper])
@@ -196,6 +161,10 @@ def _score_confidence(evidence: list[Evidence], entrypoints: list[Path]) -> Conf
         return "medium"
 
     return "low"
+
+
+def _is_engine_like(item: Evidence) -> bool:
+    return item.category in {"engine", "electron-marker"}
 
 
 def _cap_confidence_for_size(
@@ -212,58 +181,49 @@ def _cap_confidence_for_size(
     return confidence
 
 
-def _outermost_bundle(path: Path, suffix: Literal[".app", ".framework"]) -> Path | None:
-    candidates = [
-        candidate
-        for candidate in (path, *path.parents)
-        if candidate.name.endswith(suffix)
-    ]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda candidate: len(candidate.parts))
-
-
-def _flat_runtime_root_for(path: Path) -> Path:
-    if path.name == "libcef.dylib" and path.parent.name in {
-        "lib",
-        "Frameworks",
-        "Libraries",
-    }:
-        return path.parent.parent
-
-    if path.parent.name == "Resources":
-        return path.parent.parent
-
-    if path.parent.name == "locales" and path.parent.parent.name == "Resources":
-        return path.parent.parent.parent
-
-    return path.parent if path.is_file() else path
-
-
 def _find_entrypoints(
-    root: Path, *, max_depth: int | None = None, follow_symlinks: bool = False
+    root: Path,
+    *,
+    max_depth: int | None = None,
+    follow_symlinks: bool = False,
+    profile: PlatformProfile | None = None,
 ) -> list[Path]:
     """Legacy single-purpose entrypoint walk kept for external callers."""
     return _walk_runtime_extras(
-        root, max_depth=max_depth, follow_symlinks=follow_symlinks
+        root,
+        profile=profile if profile is not None else current_profile(),
+        max_depth=max_depth,
+        follow_symlinks=follow_symlinks,
     )[0]
 
 
-def _size_bytes(root: Path, *, follow_symlinks: bool = False) -> int:
+def _size_bytes(
+    root: Path,
+    *,
+    follow_symlinks: bool = False,
+    profile: PlatformProfile | None = None,
+) -> int:
     """Legacy single-purpose size walk kept for external callers."""
-    return _walk_runtime_extras(root, max_depth=None, follow_symlinks=follow_symlinks)[
-        1
-    ]
+    return _walk_runtime_extras(
+        root,
+        profile=profile if profile is not None else current_profile(),
+        max_depth=None,
+        follow_symlinks=follow_symlinks,
+    )[1]
 
 
 def _walk_runtime_extras(
-    root: Path, *, max_depth: int | None = None, follow_symlinks: bool = False
+    root: Path,
+    *,
+    profile: PlatformProfile,
+    max_depth: int | None = None,
+    follow_symlinks: bool = False,
 ) -> tuple[list[Path], int]:
     if root.is_file():
         size = 0
         with _suppress(OSError):
             size = root.stat().st_size
-        return [root] if _is_executable(root) else [], size
+        return [root] if profile.is_executable(root) else [], size
 
     entrypoints: list[Path] = []
     total_size = 0
@@ -276,9 +236,9 @@ def _walk_runtime_extras(
     ):
         with _suppress(OSError):
             total_size += path.stat().st_size
-        if path.suffix in {".dylib", ".so"}:
+        if path.suffix.lower() in profile.library_suffixes:
             continue
-        if _is_executable(path):
+        if profile.is_executable(path):
             entrypoints.append(path)
     return entrypoints, total_size
 
@@ -286,14 +246,15 @@ def _walk_runtime_extras(
 def _iter_seed_paths(
     root: Path,
     *,
+    profile: PlatformProfile,
     max_depth: int | None,
     follow_symlinks: bool,
     on_error: Callable[[str], None],
 ) -> Iterator[Path]:
     command = _fd_seed_command(
-        root, max_depth=max_depth, follow_symlinks=follow_symlinks
+        root, profile=profile, max_depth=max_depth, follow_symlinks=follow_symlinks
     ) or _find_seed_command(
-        root, max_depth=max_depth, follow_symlinks=follow_symlinks
+        root, profile=profile, max_depth=max_depth, follow_symlinks=follow_symlinks
     )
 
     if command is not None:
@@ -321,7 +282,11 @@ def _iter_seed_paths(
 
 
 def _fd_seed_command(
-    root: Path, *, max_depth: int | None, follow_symlinks: bool
+    root: Path,
+    *,
+    profile: PlatformProfile,
+    max_depth: int | None,
+    follow_symlinks: bool,
 ) -> list[str] | None:
     executable = shutil.which("fd") or shutil.which("fdfind")
     if executable is None or follow_symlinks:
@@ -330,13 +295,24 @@ def _fd_seed_command(
     command = [executable, "-u", "--absolute-path", "-0"]
     if max_depth is not None:
         command.extend(["--max-depth", str(max_depth + 1)])
-    command.extend([_SEED_FD_REGEX, str(root)])
+    regex = "^(" + profile.seed_fd_names_regex + ")$"
+    if profile.case_insensitive_names:
+        regex = "(?i)" + regex
+    command.extend([regex, str(root)])
     return command
 
 
 def _find_seed_command(
-    root: Path, *, max_depth: int | None, follow_symlinks: bool
+    root: Path,
+    *,
+    profile: PlatformProfile,
+    max_depth: int | None,
+    follow_symlinks: bool,
 ) -> list[str] | None:
+    if not profile.find_seed_command_supported:
+        # Windows ships an unrelated legacy find.exe (a grep); never invoke it.
+        return None
+
     executable = shutil.which("find")
     if executable is None:
         return None
@@ -345,7 +321,8 @@ def _find_seed_command(
     if max_depth is not None:
         command.extend(["-maxdepth", str(max_depth + 1)])
     command.append("(")
-    for index, name in enumerate(_SEED_FIND_NAMES):
+    names = list(profile.seed_exact_names) + list(profile.seed_extra_globs)
+    for index, name in enumerate(names):
         if index:
             command.append("-o")
         command.extend(["-name", name])
@@ -486,14 +463,6 @@ def _filter_walk_dirs(
     dir_names[:] = kept
 
 
-def _is_executable(path: Path) -> bool:
-    try:
-        mode = path.stat().st_mode
-    except OSError:
-        return False
-    return path.is_file() and bool(mode & (S_IXUSR | S_IXGRP | S_IXOTH))
-
-
 def _depth_from(root: Path, current: Path) -> int:
     try:
         return len(current.relative_to(root).parts)
@@ -510,21 +479,3 @@ def _dedupe_evidence(evidence: list[Evidence]) -> list[Evidence]:
             seen.add(key)
             deduped.append(item)
     return deduped
-
-
-def _read_metadata(root: Path) -> dict[str, str]:
-    info_plist = root / "Contents" / "Info.plist"
-    if not info_plist.exists():
-        return {}
-    try:
-        with info_plist.open("rb") as plist_file:
-            data = plistlib.load(plist_file)
-    except (OSError, plistlib.InvalidFileException, ValueError):
-        return {}
-
-    metadata: dict[str, str] = {}
-    for key in _ALLOWED_METADATA_KEYS:
-        value = data.get(key)
-        if isinstance(value, str):
-            metadata[key] = value
-    return metadata

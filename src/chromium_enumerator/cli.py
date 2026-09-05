@@ -5,25 +5,26 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from .platforms import PlatformProfile, current_profile, profile_for_name
 from .scanner import ChromiumScanner
-
-_DEFAULT_ROOTS = ("/Applications", "~/Applications", "/opt/homebrew", "/usr/local")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    profile = current_profile() if args.platform == "auto" else profile_for_name(args.platform)
     roots = (
         [Path(root).expanduser() for root in args.roots]
         if args.roots
-        else default_roots()
+        else default_roots(profile)
     )
     scanner = ChromiumScanner(
         include_low_confidence=args.include_low_confidence,
         max_depth=args.max_depth,
         follow_symlinks=args.follow_symlinks,
         exhaustive=args.exhaustive,
+        profile=profile,
     )
     results = scanner.scan(roots)
 
@@ -34,20 +35,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
     else:
-        print(format_text(results, verbose=args.verbose))
+        print(format_text(results, verbose=args.verbose, profile=profile))
 
     return 0
 
 
-def default_roots() -> list[Path]:
-    return [
-        Path(root).expanduser()
-        for root in _DEFAULT_ROOTS
-        if Path(root).expanduser().exists()
-    ]
+def default_roots(profile: PlatformProfile | None = None) -> list[Path]:
+    active = profile if profile is not None else current_profile()
+    return active.default_roots()
 
 
-def format_text(results, *, verbose: bool = False) -> str:  # noqa: ANN001 - accepts RuntimeResult-like values for simple tests and reuse.
+def format_text(results, *, verbose: bool = False, profile: PlatformProfile | None = None) -> str:
+    active = profile if profile is not None else current_profile()
     if not results:
         return "No probable Chromium runtimes found."
 
@@ -64,7 +63,9 @@ def format_text(results, *, verbose: bool = False) -> str:  # noqa: ANN001 - acc
 
     lines.extend(["", "Runtimes:"])
     for index, result in enumerate(results, start=1):
-        display_name = _display_name(result)
+        display_name = active.display_name_for(
+            result.root, result.metadata, result.family
+        )
         summary = f"{display_name} — {_title_family(result.family)}, {result.confidence} confidence"
         if result.size_bytes:
             summary = f"{summary}, {_format_size(result.size_bytes)}"
@@ -88,14 +89,6 @@ def format_text(results, *, verbose: bool = False) -> str:  # noqa: ANN001 - acc
     return "\n".join(lines)
 
 
-def _display_name(result) -> str:  # noqa: ANN001
-    for key in ("CFBundleDisplayName", "CFBundleName"):
-        value = result.metadata.get(key)
-        if value:
-            return value
-    return result.root.name
-
-
 def _title_family(family: str) -> str:
     if family == "qtwebengine":
         return "QtWebEngine"
@@ -117,12 +110,18 @@ def _format_size(size_bytes: int) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chromium-count",
-        description="Statically enumerate probable runnable Chromium-family runtime cores on macOS.",
+        description="Statically enumerate probable runnable Chromium-family runtime cores.",
     )
     parser.add_argument(
         "roots",
         nargs="*",
-        help="Directories to scan. Defaults to common macOS application/install roots.",
+        help="Directories to scan. Defaults to common application/install roots for the active platform.",
+    )
+    parser.add_argument(
+        "--platform",
+        choices=("auto", "macos", "windows"),
+        default="auto",
+        help="Detection rules to use. Defaults to the host platform.",
     )
     parser.add_argument(
         "--json",
@@ -154,5 +153,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--exhaustive",
         action="store_true",
         help="Use full Python os.walk traversal instead of default targeted seed search.",
+    )
+    parser.epilog = (
+        "Environment overrides for Windows metadata extraction: "
+        "CHROMIUM_COUNT_STUB_FILEDESCRIPTION, CHROMIUM_COUNT_STUB_PRODUCTNAME, "
+        "CHROMIUM_COUNT_STUB_FILEVERSION."
     )
     return parser
