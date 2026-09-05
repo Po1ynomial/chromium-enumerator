@@ -356,7 +356,7 @@ class WindowsProfile:
         return path.is_file() and path.suffix.lower() == ".exe"
 
     def read_metadata(self, root: Path) -> dict[str, str]:
-        metadata: dict[str, str] = {}
+        metadata = _read_pe_version_metadata(root)
         for env_var in _WINDOWS_METADATA_ENV_VARS:
             value = os.environ.get(f"CHROMIUM_COUNT_STUB_{env_var.upper()}")
             if value:
@@ -429,6 +429,47 @@ def _flat_runtime_root_for(path: Path) -> Path:
         return path.parent.parent.parent
 
     return path.parent if path.is_file() else path
+
+
+def _read_pe_version_metadata(root: Path) -> dict[str, str]:
+    """Best-effort VS_VERSION_INFO extraction from the root's primary exe.
+
+    Requires the optional `pefile` extra; returns an empty mapping when it is
+    not installed, the exe is missing, or the binary cannot be parsed.
+    """
+    try:
+        import pefile  # type: ignore[import-not-found]
+    except ImportError:
+        return {}
+
+    candidates = sorted(root.glob("*.exe"))
+    if not candidates:
+        return {}
+
+    wanted = {key.lower(): key for key in _WINDOWS_METADATA_ENV_VARS}
+    metadata: dict[str, str] = {}
+    try:
+        pe = pefile.PE(str(candidates[0]))
+    except (OSError, pefile.PEFormatError):
+        return {}
+    try:
+        for file_info in getattr(pe, "FileInfo", []):
+            for entry in file_info:
+                key = getattr(entry, "Key", b"")
+                if isinstance(key, bytes) and key.decode(
+                    errors="replace"
+                ) != "StringFileInfo":
+                    continue
+                for string_table in getattr(entry, "StringTable", []):
+                    for raw_key, raw_value in string_table.entries.items():
+                        name = raw_key.decode(errors="replace").lower()
+                        if name in wanted:
+                            value = raw_value.decode(errors="replace").strip("\x00 ")
+                            if value:
+                                metadata[wanted[name]] = value
+    except (AttributeError, UnicodeDecodeError, ValueError):
+        return metadata
+    return metadata
 
 
 _MACOS_PROFILE = MacOSProfile()

@@ -179,6 +179,28 @@ def test_entrypoints_exclude_payload_dlls(tmp_path):
     assert result.entrypoints == [runtime / "cefapp.exe"]
 
 
+def test_metadata_reads_stub_environment(monkeypatch, tmp_path):
+    runtime = tmp_path / "cefapp"
+    make_file(runtime / "cefapp.exe")
+    make_file(runtime / "libcef.dll")
+    make_file(runtime / "icudtl.dat")
+    make_large_payload(runtime)
+    monkeypatch.setenv("CHROMIUM_COUNT_STUB_FILEDESCRIPTION", "CEF Test Host")
+    monkeypatch.setenv("CHROMIUM_COUNT_STUB_PRODUCTNAME", "cefapp")
+
+    [result] = windows_scanner().scan([tmp_path])
+
+    assert result.metadata["FileDescription"] == "CEF Test Host"
+    assert result.metadata["ProductName"] == "cefapp"
+
+
+def test_metadata_is_empty_without_pefile_or_stub(tmp_path):
+    runtime = tmp_path / "cefapp"
+    make_file(runtime / "cefapp.exe")
+
+    assert WindowsProfile().read_metadata(runtime) == {}
+
+
 def test_scoring_treats_electron_markers_as_engine_signals():
     evidence = [
         Evidence("executable", Path("/app/app.exe"), "app.exe"),
