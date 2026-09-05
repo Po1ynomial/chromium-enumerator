@@ -148,23 +148,28 @@ class ChromiumScanner:
 def _score_confidence(evidence: list[Evidence], entrypoints: list[Path]) -> Confidence:
     categories = {item.category for item in evidence}
     has_executable = "executable" in categories or bool(entrypoints)
-    marker_count = len({item.path.name for item in evidence if _is_engine_like(item)})
-    has_engine = marker_count > 0
+    has_engine = "engine" in categories
+    electron_marker_names = {
+        item.path.name
+        for item in evidence
+        if item.category == "electron-marker"
+    }
+    # Two or more distinct Electron marker DLLs substitute for named engine
+    # evidence: Electron on Windows ships no single identifiable engine file.
+    has_strong_engine = has_engine or len(electron_marker_names) >= 2
     has_resource = "resource" in categories
     has_helper = "helper" in categories
 
-    if has_executable and marker_count >= 1 and (has_resource or has_helper):
+    if has_executable and has_strong_engine and (has_resource or has_helper):
         return "high"
 
-    secondary_count = sum([has_engine, has_resource, has_helper])
+    secondary_count = sum(
+        [has_strong_engine or bool(electron_marker_names), has_resource, has_helper]
+    )
     if has_executable and secondary_count >= 2:
         return "medium"
 
     return "low"
-
-
-def _is_engine_like(item: Evidence) -> bool:
-    return item.category in {"engine", "electron-marker"}
 
 
 def _cap_confidence_for_size(

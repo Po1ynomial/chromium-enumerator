@@ -124,8 +124,18 @@ def infer_family(evidence: list[Evidence]) -> str:
 
     Engine/framework evidence is more authoritative than generic helper names:
     Chrome, Edge, Brave, and Electron apps all have helpers, but their engine
-    names identify the actual family.
+    names identify the actual family. Launcher executable hints outrank both:
+    on Windows every Chromium browser ships the same chrome.dll, so the exe
+    name is the only signal distinguishing them.
     """
+    executable_hints = [
+        item.family_hint
+        for item in evidence
+        if item.category == "executable" and item.family_hint
+    ]
+    if executable_hints:
+        return Counter(executable_hints).most_common(1)[0][0]
+
     engine_hints = [
         item.family_hint
         for item in evidence
@@ -326,15 +336,19 @@ class WindowsProfile:
 
     def runtime_root_for(self, path: Path) -> Path:
         parts = path.parts
+        lowered = tuple(part.lower() for part in parts)
 
-        for index in range(len(parts) - 1):
-            if parts[index].lower() == "locales":
-                return Path(*parts[:index]).parent
+        for index in range(len(lowered)):
+            if lowered[index] == "locales":
+                return Path(*parts[:index])
 
-        if len(parts) >= 2 and parts[-2].lower() in BROWSER_VERSION_DIR_NAMES:
+        if len(lowered) >= 3 and lowered[-3] in BROWSER_VERSION_DIR_NAMES:
             # Version-dir layout: .../Application/<version>/chrome.dll with the
             # launcher exe one level up from the version directory.
-            return Path(*parts[:-2]).parent
+            return Path(*parts[:-2])
+
+        if len(lowered) >= 2 and lowered[-2] == "resources":
+            return Path(*parts[:-2])
 
         return path.parent if path.is_file() else path
 
