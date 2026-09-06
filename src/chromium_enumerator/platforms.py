@@ -338,14 +338,17 @@ class WindowsProfile:
         parts = path.parts
         lowered = tuple(part.lower() for part in parts)
 
+        # Version-dir layout: .../Application/<version>/... with the launcher
+        # exe one level up from the version directory. Checked before the
+        # locales/resources rules because browser resources nest inside the
+        # version directory.
+        for index in range(len(lowered) - 1):
+            if lowered[index] in BROWSER_VERSION_DIR_NAMES:
+                return Path(*parts[: index + 1])
+
         for index in range(len(lowered)):
             if lowered[index] == "locales":
                 return Path(*parts[:index])
-
-        if len(lowered) >= 3 and lowered[-3] in BROWSER_VERSION_DIR_NAMES:
-            # Version-dir layout: .../Application/<version>/chrome.dll with the
-            # launcher exe one level up from the version directory.
-            return Path(*parts[:-2])
 
         if len(lowered) >= 2 and lowered[-2] == "resources":
             return Path(*parts[:-2])

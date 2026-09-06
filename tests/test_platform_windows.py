@@ -181,6 +181,22 @@ def test_entrypoints_exclude_payload_dlls(tmp_path):
     assert result.entrypoints == [runtime / "cefapp.exe"]
 
 
+def test_nested_version_dir_resources_stay_under_application(tmp_path):
+    app = tmp_path / "Microsoft" / "Edge" / "Application"
+    make_file(app / "msedge.exe")
+    make_file(app / "137.0.0.0" / "chrome.dll")
+    make_file(app / "137.0.0.0" / "locales" / "en-US.pak")
+    make_file(app / "137.0.0.0" / "resources.pak")
+    make_large_payload(app)
+
+    results = windows_scanner(include_low_confidence=True).scan([tmp_path])
+
+    assert [result.root for result in results] == [app]
+    [result] = results
+    assert result.family == "edge"
+    assert result.confidence == "high"
+
+
 def test_cli_platform_windows_scans_windows_layout(tmp_path, capsys):
     runtime = tmp_path / "cefapp"
     make_file(runtime / "cefapp.exe")
