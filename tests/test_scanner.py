@@ -1,10 +1,16 @@
+import os
 import plistlib
 from pathlib import Path
 
+import pytest
+
 from chromium_enumerator.scanner import ChromiumScanner
 
-LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="macOS fixtures require POSIX executable bits"
+)
 
+LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
 
 def make_file(path: Path, content: bytes = b"x", *, executable: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,14 @@
 import json
+import os
 from pathlib import Path
 
+import pytest
+
 from chromium_enumerator.cli import main
+
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="macOS fixtures require POSIX executable bits"
+)
 
 LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
 
