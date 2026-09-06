@@ -66,6 +66,14 @@ Scan Windows-style layouts from any host (useful for mounted drives or testing):
 chromium-count --platform windows /mnt/windows/Program\ Files
 ```
 
+On Windows, restrict results to software registered in the registry (uninstall records, App Paths, StartMenuInternet):
+
+```sh
+chromium-count --registry-only
+```
+
+Windows results also carry registry metadata when the runtime matches an installed-program record; see `registered_as` in `--json` output or the `registered:` lines in `--verbose`.
+
 ## How Detection Works
 
 Chromium does not have one universal static signature. This scanner uses evidence clusters instead.
@@ -78,7 +86,7 @@ A high-confidence result usually has:
 
 Single isolated files are not counted by default because they are not enough to prove a directly runnable Chromium core.
 
-Detection rules live in per-platform profiles (`platforms.py`); the active profile is chosen from the host OS unless `--platform` overrides it.
+Detection rules live in per-platform profiles (`platforms.py`); the active profile is chosen from the host OS unless `--platform` overrides it. On Windows, install records from the registry (uninstall keys under HKLM/HKCU including the 32-bit view, App Paths, and StartMenuInternet clients) additionally enrich results with `registered_as` metadata and enable `--registry-only` filtering; registry data is never treated as detection evidence on its own.
 
 By default, the scanner uses native tools only for direct seed discovery: it asks `fd` when available, then (on macOS only) `find`, to locate known Chromium target filenames such as engine binaries, `.pak` resources, crashpad handlers, and helper apps. It then merges those seed paths into probable runtime roots and verifies each candidate root with Python traversal. On Windows the POSIX `find` fallback is disabled (Windows ships an unrelated legacy `find.exe`); without `fd`, seed discovery falls back to `os.walk`. Windows filename matching is case-insensitive.
 
@@ -143,7 +151,7 @@ chromium-count
 - Does not inspect archives such as `.zip`, `.dmg`, `.pkg`, or `.asar`.
 - Does not execute application code.
 - Does not yet extract Chromium versions from binary strings.
-- Windows metadata (ProductName, FileDescription, FileVersion) requires the optional `pefile` extra (`chromium-enumerator[windows-metadata]`); without it, metadata is empty unless stubbed via `CHROMIUM_COUNT_STUB_*` environment variables.
+- Windows metadata (ProductName, FileDescription, FileVersion) requires the optional `pefile` extra (`chromium-enumerator[windows-metadata]`); without it, metadata is empty unless stubbed via `CHROMIUM_COUNT_STUB_*` environment variables. Registry `registered_as` metadata requires no extra dependencies but only exists on Windows.
 - Linux layouts are not yet supported; the platform profile mechanism (`platforms.py`) is the extension point.
 - Static detection can still produce false positives or miss heavily customized runtimes.
 - Exceptionally small candidates are treated as likely fixtures/incomplete leftovers and demoted to low confidence.
