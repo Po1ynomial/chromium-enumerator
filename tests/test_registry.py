@@ -154,16 +154,13 @@ def test_registry_only_matches_ancestor_records(tmp_path):
     assert [result.root for result in results] == [nested]
 
 
-def test_registry_only_without_registry_support_keeps_results(tmp_path):
-    app = make_cef_app(tmp_path)
-    profile = WindowsProfile()  # registry_roots exists but returns {} off-Windows
+def test_registry_only_filters_everything_with_empty_registry(tmp_path):
+    make_cef_app(tmp_path)
+    profile = RegistryStubProfile({})
 
     results = windows_scanner(profile=profile, registry_only=True).scan([tmp_path])
 
-    if profile.registry_roots():
-        assert [result.root for result in results] == [app]
-    else:
-        assert results == []
+    assert results == []
 
 
 @pytest.mark.skipif(
