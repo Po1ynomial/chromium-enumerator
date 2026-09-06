@@ -33,6 +33,7 @@ class RuntimeResult:
     entrypoints: list[Path] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
     size_bytes: int = 0
+    registered_as: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,4 +44,5 @@ class RuntimeResult:
             "entrypoints": [str(path) for path in self.entrypoints],
             "metadata": self.metadata,
             "size_bytes": self.size_bytes,
+            "registered_as": self.registered_as,
         }

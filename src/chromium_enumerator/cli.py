@@ -24,6 +24,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_depth=args.max_depth,
         follow_symlinks=args.follow_symlinks,
         exhaustive=args.exhaustive,
+        registry_only=args.registry_only,
         profile=profile,
     )
     results = scanner.scan(roots)
@@ -63,9 +64,7 @@ def format_text(results, *, verbose: bool = False, profile: PlatformProfile | No
 
     lines.extend(["", "Runtimes:"])
     for index, result in enumerate(results, start=1):
-        display_name = active.display_name_for(
-            result.root, result.metadata, result.family
-        )
+        display_name = _display_name(result, active)
         summary = f"{display_name} — {_title_family(result.family)}, {result.confidence} confidence"
         if result.size_bytes:
             summary = f"{summary}, {_format_size(result.size_bytes)}"
@@ -78,6 +77,11 @@ def format_text(results, *, verbose: bool = False, profile: PlatformProfile | No
                     f"{key}={value}" for key, value in sorted(result.metadata.items())
                 )
                 lines.append(f"     metadata: {metadata}")
+            for registration in result.registered_as:
+                registered = ", ".join(
+                    f"{key}={value}" for key, value in sorted(registration.items())
+                )
+                lines.append(f"     registered: {registered}")
             if result.entrypoints:
                 lines.append("     entrypoints:")
                 lines.extend(f"       - {path}" for path in result.entrypoints)
@@ -87,6 +91,14 @@ def format_text(results, *, verbose: bool = False, profile: PlatformProfile | No
                 for item in result.evidence
             )
     return "\n".join(lines)
+
+
+def _display_name(result, profile: PlatformProfile) -> str:
+    if result.registered_as:
+        name = result.registered_as[0].get("DisplayName")
+        if name:
+            return name
+    return profile.display_name_for(result.root, result.metadata, result.family)
 
 
 def _title_family(family: str) -> str:
@@ -153,6 +165,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--exhaustive",
         action="store_true",
         help="Use full Python os.walk traversal instead of default targeted seed search.",
+    )
+    parser.add_argument(
+        "--registry-only",
+        action="store_true",
+        help="Windows only: only report runtimes whose root matches an installed-program registry record (uninstall, App Paths, or StartMenuInternet).",
     )
     parser.epilog = (
         "Environment overrides for Windows metadata extraction: "

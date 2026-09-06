@@ -23,18 +23,22 @@ class ChromiumScanner:
         max_depth: int | None = None,
         follow_symlinks: bool = False,
         exhaustive: bool = False,
+        registry_only: bool = False,
         profile: PlatformProfile | None = None,
     ) -> None:
         self.include_low_confidence = include_low_confidence
         self.max_depth = max_depth
         self.follow_symlinks = follow_symlinks
         self.exhaustive = exhaustive
+        self.registry_only = registry_only
         self.profile = profile if profile is not None else current_profile()
         self.warnings: list[str] = []
 
     def scan(self, roots: Iterable[Path | str]) -> list[RuntimeResult]:
         self.warnings.clear()
         grouped: dict[Path, list[Evidence]] = defaultdict(list)
+
+        registry_index = self._registry_seed_index()
 
         for root_value in roots:
             root = Path(root_value).expanduser()
@@ -51,18 +55,77 @@ class ChromiumScanner:
                     grouped[self._runtime_root_for(evidence.path)].append(evidence)
             else:
                 for candidate_root in self._candidate_roots_from_seeds(root):
+                    if self.registry_only and not self._has_registry_ancestor(
+                        candidate_root, registry_index
+                    ):
+                        continue
                     for evidence in self._walk_evidence_exhaustive(candidate_root):
                         grouped[candidate_root].append(evidence)
 
         results = [
             self._build_result(root, evidence) for root, evidence in grouped.items()
         ]
+        self._apply_registry_metadata(results, registry_index)
         filtered = [
             result
             for result in results
             if self.include_low_confidence or result.confidence != "low"
         ]
         return sorted(filtered, key=lambda result: str(result.root))
+
+    def _registry_seed_index(self) -> dict[str, tuple[Path, dict[str, str]]]:
+        """Casefolded registry install paths -> (path, metadata), Windows only."""
+        registry_roots = getattr(self.profile, "registry_roots", None)
+        if registry_roots is None:
+            return {}
+        try:
+            records = registry_roots()
+        except OSError:
+            return {}
+        return {
+            _casefold_key(path): (path, metadata)
+            for path, metadata in records.items()
+        }
+
+    def _registry_records_for(
+        self,
+        root: Path,
+        index: dict[str, tuple[Path, dict[str, str]]],
+    ) -> list[dict[str, str]]:
+        """Registry records at or above `root` (shortest match first)."""
+        if not index:
+            return []
+        root_key = _casefold_key(root)
+        matches = []
+        for record_key, (_path, metadata) in index.items():
+            if root_key == record_key or root_key.startswith(record_key + os.sep):
+                matches.append((len(record_key), metadata))
+        matches.sort(key=lambda item: item[0])
+        return [metadata for _length, metadata in matches]
+
+    def _has_registry_ancestor(
+        self,
+        root: Path,
+        index: dict[str, tuple[Path, dict[str, str]]],
+    ) -> bool:
+        return bool(self._registry_records_for(root, index))
+
+    def _apply_registry_metadata(
+        self,
+        results: list[RuntimeResult],
+        index: dict[str, tuple[Path, dict[str, str]]],
+    ) -> None:
+        if not index:
+            return
+        for result in results:
+            for metadata in self._registry_records_for(result.root, index):
+                entry = {
+                    key: value
+                    for key, value in metadata.items()
+                    if key in {"DisplayName", "DisplayVersion", "Publisher", "source"}
+                }
+                if entry:
+                    result.registered_as.append(entry)
 
     def _candidate_roots_from_seeds(self, root: Path) -> list[Path]:
         candidates = {
@@ -143,6 +206,13 @@ class ChromiumScanner:
 
     def _runtime_root_for(self, path: Path) -> Path:
         return self.profile.runtime_root_for(path)
+
+
+def _casefold_key(path: Path) -> str:
+    try:
+        return os.path.normcase(str(path.resolve()))
+    except OSError:
+        return os.path.normcase(str(path))
 
 
 def _score_confidence(evidence: list[Evidence], entrypoints: list[Path]) -> Confidence:
