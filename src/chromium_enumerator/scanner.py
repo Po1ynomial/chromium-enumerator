@@ -74,7 +74,7 @@ class ChromiumScanner:
 
         results = [
             self._build_result(root, bucket)
-            for root, bucket in buckets.items()
+            for root, bucket in self._fold_weak_buckets(buckets).items()
             if bucket.evidence
         ]
         self._apply_registry_metadata(results, registry_index)
@@ -174,6 +174,41 @@ class ChromiumScanner:
     ) -> _RuntimeBucket:
         root = self.profile.runtime_root_for(path, info=info)
         return buckets.setdefault(root, _RuntimeBucket())
+
+    def _fold_weak_buckets(
+        self, buckets: dict[Path, _RuntimeBucket]
+    ) -> dict[Path, _RuntimeBucket]:
+        """Give a runtime the parts of its subtree that are not runtimes themselves.
+
+        A walk attributes every path to its nearest runtime root, but a plain
+        subdirectory such as ``BHO``, ``swiftshader``, or ``legacyPM`` is not
+        one: it holds a lone executable or a pair of marker DLLs and scores
+        ``low`` on its own. Folding those into the nearest ancestor that does
+        score as a runtime keeps the install's entrypoints and bytes with the
+        install instead of stranding them in a phantom result that gets
+        filtered away. A weak bucket with no such ancestor is kept as-is, so
+        ``--include-low-confidence`` still surfaces isolated evidence.
+        """
+
+        strong: dict[Path, _RuntimeBucket] = {}
+        weak: dict[Path, _RuntimeBucket] = {}
+        for root, bucket in buckets.items():
+            evidence = _dedupe_evidence(bucket.evidence)
+            scored = _score_confidence(evidence, sorted(bucket.entrypoints, key=str))
+            (weak if scored == "low" else strong)[root] = bucket
+
+        for root, bucket in weak.items():
+            parent = _nearest_ancestor(
+                root, strong, case_insensitive=self.profile.case_insensitive_names
+            )
+            if parent is None:
+                strong[root] = bucket
+                continue
+            target = strong[parent]
+            target.evidence.extend(bucket.evidence)
+            target.entrypoints |= bucket.entrypoints
+            target.size_bytes += bucket.size_bytes
+        return strong
 
     def _build_result(self, root: Path, bucket: _RuntimeBucket) -> RuntimeResult:
         evidence = _dedupe_evidence(bucket.evidence)
@@ -445,6 +480,18 @@ def _is_covered(path: Path, parents: Iterable[Path], case_insensitive: bool) -> 
         if target.startswith(base + os.sep):
             return True
     return False
+
+
+def _nearest_ancestor(
+    path: Path, candidates: Iterable[Path], *, case_insensitive: bool
+) -> Path | None:
+    best: Path | None = None
+    for candidate in candidates:
+        if candidate == path or not _is_covered(path, [candidate], case_insensitive):
+            continue
+        if best is None or len(candidate.parts) > len(best.parts):
+            best = candidate
+    return best
 
 
 def _dedupe_evidence(evidence: list[Evidence]) -> list[Evidence]:

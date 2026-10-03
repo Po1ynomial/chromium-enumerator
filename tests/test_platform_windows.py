@@ -213,6 +213,63 @@ def test_cli_platform_windows_scans_windows_layout(tmp_path, capsys):
     assert output[0]["confidence"] == "high"
 
 
+def test_subdirectories_without_engine_evidence_fold_into_the_install(tmp_path):
+    runtime = tmp_path / "BigApp"
+    make_file(runtime / "BigApp.exe")
+    make_file(runtime / "libcef.dll")
+    make_file(runtime / "icudtl.dat")
+    make_file(runtime / "swiftshader" / "libEGL.dll")
+    make_file(runtime / "swiftshader" / "libGLESv2.dll")
+    make_file(runtime / "Installer" / "setup.exe")
+    make_file(runtime / "legacyPM" / "Extra.exe")
+    make_large_payload(runtime)
+
+    results = windows_scanner(include_low_confidence=True).scan([tmp_path])
+
+    [result] = results
+    assert result.root == runtime
+    assert result.confidence == "high"
+    assert {
+        runtime / "Installer" / "setup.exe",
+        runtime / "legacyPM" / "Extra.exe",
+    } <= set(result.entrypoints)
+    assert {
+        runtime / "swiftshader" / "libEGL.dll",
+        runtime / "swiftshader" / "libGLESv2.dll",
+        runtime / "Installer" / "setup.exe",
+    } <= {item.path for item in result.evidence}
+    assert result.size_bytes == sum(
+        path.stat().st_size for path in runtime.rglob("*") if path.is_file()
+    )
+
+
+def test_nested_runtime_keeps_its_bytes_out_of_the_parent(tmp_path):
+    outer = tmp_path / "Outer"
+    make_file(outer / "Outer.exe")
+    make_file(outer / "libcef.dll")
+    make_file(outer / "icudtl.dat")
+    make_large_payload(outer)
+    inner = outer / "bundled" / "cef.win64"
+    make_file(inner / "inner.exe")
+    make_file(inner / "libcef.dll")
+    make_file(inner / "icudtl.dat")
+    make_large_payload(inner)
+
+    results = windows_scanner().scan([tmp_path])
+
+    roots = {result.root: result for result in results}
+    assert set(roots) == {outer, inner}
+    inner_bytes = sum(
+        path.stat().st_size for path in inner.rglob("*") if path.is_file()
+    )
+    outer_bytes = sum(
+        path.stat().st_size for path in outer.rglob("*") if path.is_file()
+    )
+    assert roots[inner].size_bytes == inner_bytes
+    assert roots[outer].size_bytes == outer_bytes - inner_bytes
+    assert inner / "libcef.dll" not in {item.path for item in roots[outer].evidence}
+
+
 def test_metadata_reads_stub_environment(monkeypatch, tmp_path):
     runtime = tmp_path / "cefapp"
     make_file(runtime / "cefapp.exe")
