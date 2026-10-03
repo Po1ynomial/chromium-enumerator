@@ -2,11 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from chromium_enumerator.platforms import (
-    WindowsProfile,
-    _install_root_from_uninstall,
-    _parse_registry_exe_path,
-)
+from chromium_enumerator.cli import main
+from chromium_enumerator.platforms import WindowsProfile
+from chromium_enumerator.registry import install_root_from_uninstall, parse_exe_path
 from chromium_enumerator.scanner import ChromiumScanner
 
 
@@ -47,26 +45,26 @@ def windows_scanner(profile=None, **kwargs) -> ChromiumScanner:
     )
 
 
-def test_parse_registry_exe_path_handles_quotes_and_args(tmp_path):
+def test_parse_exe_path_handles_quotes_and_args(tmp_path):
     exe = tmp_path / "app" / "app.exe"
     make_file(exe)
 
-    assert _parse_registry_exe_path(f'"{exe}" /flag') == exe
-    assert _parse_registry_exe_path(str(exe)) == exe
-    assert _parse_registry_exe_path(f'"{exe}",0') == exe
+    assert parse_exe_path(f'"{exe}" /flag') == exe
+    assert parse_exe_path(str(exe)) == exe
+    assert parse_exe_path(f'"{exe}",0') == exe
 
 
-def test_parse_registry_exe_path_rejects_non_exe(tmp_path):
-    assert _parse_registry_exe_path(str(tmp_path / "app" / "icon.ico")) is None
-    assert _parse_registry_exe_path("") is None
-    assert _parse_registry_exe_path(None) is None
+def test_parse_exe_path_rejects_non_exe(tmp_path):
+    assert parse_exe_path(str(tmp_path / "app" / "icon.ico")) is None
+    assert parse_exe_path("") is None
+    assert parse_exe_path(None) is None
 
 
 def test_install_root_prefers_install_location(tmp_path):
     install = tmp_path / "app"
     install.mkdir()
 
-    root = _install_root_from_uninstall({"InstallLocation": f'"{install}"'})
+    root = install_root_from_uninstall({"InstallLocation": f'"{install}"'})
 
     assert root == install
 
@@ -74,7 +72,7 @@ def test_install_root_prefers_install_location(tmp_path):
 def test_install_root_falls_back_to_display_icon_parent(tmp_path):
     exe = make_file(tmp_path / "app" / "app.exe")
 
-    root = _install_root_from_uninstall({"DisplayIcon": f'"{exe}"'})
+    root = install_root_from_uninstall({"DisplayIcon": f'"{exe}"'})
 
     assert root == exe.parent
 
@@ -82,7 +80,7 @@ def test_install_root_falls_back_to_display_icon_parent(tmp_path):
 def test_install_root_skips_uninstaller_icons(tmp_path):
     make_file(tmp_path / "app" / "unins000.exe")
 
-    root = _install_root_from_uninstall(
+    root = install_root_from_uninstall(
         {"DisplayIcon": str(tmp_path / "app" / "unins000.exe")}
     )
 
@@ -161,6 +159,28 @@ def test_registry_only_filters_everything_with_empty_registry(tmp_path):
     results = windows_scanner(profile=profile, registry_only=True).scan([tmp_path])
 
     assert results == []
+
+
+def test_registry_only_rejected_with_exhaustive():
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--registry-only", "--exhaustive", "--platform", "windows", "/tmp"])
+
+    assert exit_info.value.code == 2
+
+
+def test_registry_only_rejected_without_windows_profile():
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--registry-only", "--platform", "macos", "/tmp"])
+
+    assert exit_info.value.code == 2
+
+
+def test_registry_only_accepted_on_windows_profile(tmp_path, capsys):
+    make_cef_app(tmp_path)
+
+    assert main(["--registry-only", "--platform", "windows", str(tmp_path)]) == 0
+
+    assert "No probable Chromium runtimes found." in capsys.readouterr().out
 
 
 @pytest.mark.skipif(

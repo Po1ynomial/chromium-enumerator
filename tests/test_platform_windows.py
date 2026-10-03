@@ -145,7 +145,7 @@ def test_find_seed_command_is_never_built_on_windows():
     assert command is None
 
 
-def test_exhaustive_scan_uses_os_walk_on_windows(tmp_path, monkeypatch):
+def test_exhaustive_scan_skips_seed_commands(tmp_path, monkeypatch):
     import shutil
 
     import chromium_enumerator.scanner as scanner_module

@@ -34,6 +34,10 @@ A profile owns:
 - the seed-search vocabulary (`seed_exact_names`, `seed_fd_names_regex`, `seed_extra_globs`, `case_insensitive_names`, `find_seed_command_supported`),
 - optional registry integration (`registry_roots`, Windows only).
 
+`classify_path`, `runtime_root_for`, and `is_executable` accept the walker's
+`FileInfo` as an optional `info=` keyword. The scanner always passes it, so a
+profiled method never re-stats a path the walk already statted.
+
 ### macOS
 
 `MacOSProfile` matches names **case-sensitively**. Engines are the `.framework` directories and `libcef.dylib` listed above. Name matching is exact for engine, resource, and helper names; helper apps are matched by suffix (`* Helper.app`, `* Helper (*).app`).
@@ -66,7 +70,7 @@ Raw evidence paths are scattered deep inside a bundle (`.../Frameworks/Electron 
 
 1. the **outermost enclosing `.app` bundle**, if any;
 2. else the **outermost enclosing `.framework`**, if any;
-3. else a flat-layout rule: a file named `libcef.dylib` whose parent is named `lib`, `Frameworks`, or `Libraries` resolves two levels up; a file directly in `Resources/` resolves to `Resources/..`; a `*.pak` under `Resources/locales/` resolves three levels up; anything else resolves to its containing directory.
+3. else a flat-layout rule: payload directories (`bin`, `lib`, `Frameworks`, `Libraries`, `Resources`, `Contents`, `MacOS`, `Helpers`, `locales`) are transparent, and the root is the parent of the highest one on the path. So `cef/bin/deep/cefhost` and `cef/Contents/Resources/icudtl.dat` both belong to `cef`, while a file directly in a normal directory stays in that directory.
 
 "Outermost" matters: a nested `Outer Helper.app` inside `Outer.app` groups under `Outer.app`, and nested helper bundles never become their own results.
 
@@ -134,12 +138,18 @@ So a single Electron marker DLL is not enough for `high`, but counts toward `med
 
 ## Entrypoints and size
 
-For each runtime root the scanner walks the tree once (`_walk_runtime_extras`) and collects:
+A result's entrypoints and bytes are accumulated during the same walk that
+gathers its evidence, in `ChromiumScanner._collect()`. There is no second
+pass over a runtime root.
 
-- **entrypoints** — every path that is executable under the profile and is not a library-suffix file, plus any path already flagged as `executable` evidence. macOS skips `.dylib`/`.so`, Windows skips `.dll`, `.manifest`, `.dat`, `.bin`, `.pak`, `.json`, `.asar`, `.ico`, `.png`, `.sig`. Deduplicated and sorted.
-- **size_bytes** — the sum of **all** regular-file sizes under the root, including the library and resource files excluded from entrypoints.
+- **entrypoints** — every regular file that is executable under the profile and whose suffix is not a library suffix. macOS skips `.dylib`/`.so`; Windows skips `.dll`, `.manifest`, `.dat`, `.bin`, `.pak`, `.json`, `.asar`, `.ico`, `.png`, `.sig`. Deduplicated and sorted.
+- **size_bytes** — the sum of every regular file attributed to the root, including the library and resource files excluded from entrypoints.
 
-Both are computed with the same walk, so a candidate root is never traversed twice for result building. A root that is itself a file is handled directly.
+**Ownership.** Every walked path is attributed to `runtime_root_for(path)`, and
+a result owns exactly the files that resolve to it. A nested runtime is
+reported separately and its bytes are not counted again in its parent. This
+holds in both seed and exhaustive mode: the two modes differ only in which
+subtrees they walk, not in how a path is attributed.
 
 ## Discovery strategy
 
@@ -149,21 +159,24 @@ Scanning has two modes. Both end up calling the same per-root evidence walk; the
 
 1. For each root, run a **native seed search** for known Chromium filenames (engine binaries, `.pak` resources, crashpad handlers, helper apps).
 2. Translate each hit into a runtime root (`runtime_root_for`) and keep the distinct roots as **candidate roots**.
-3. Walk each candidate root in Python and verify it with full evidence classification.
+3. Walk each candidate root once in Python: evidence, entrypoints, and size all come out of that pass. Nested candidate roots are dropped first, so no subtree is walked twice.
 
 Native tools used, in preference order:
 
 - **`fd`** (or `fdfind`) when on `PATH` and symlink-following is off. Invoked with `-u` (unrestricted: no ignore files, hidden files included), `--absolute-path`, `-0` (NUL-separated), an optional `--max-depth <max_depth + 1>`, and an anchored alternation regex of the profile's seed names. Windows runs it case-insensitively via `(?i)`.
 - **`find`**, macOS only. Invoked with `-P`/`-L`, an optional `-maxdepth <max_depth + 1>`, and a parenthesized `-name` alternation printed NUL-separated. Windows disables this fallback entirely because Windows ships an unrelated legacy `find.exe` (a grep), which would produce nonsense.
-- **`os.walk`**, used when neither tool applies — always the case on Windows without `fd`, and inside `--exhaustive` mode.
+- **`walk.walk_paths`**, the project's own `scandir` walker, used when neither tool applies. That is always the case on Windows without `fd`.
 
-The native search is given `max_depth + 1` as a margin; `_within_scan_depth` then re-filters results in Python so the effective depth is what you asked for. Symlinked paths are skipped unless `--follow-symlinks`, and broken symlinks are ignored rather than reported. Because `fd -u` consults no ignore files and `os.walk` does not either, **hidden and gitignored paths are always considered**; Spotlight/`mdfind` is deliberately not used because indexed search can omit files.
+The native search is given `max_depth + 1` as a margin; `walk.within_depth` then re-filters results in Python so the effective depth is what you asked for. The same predicate governs the verification walk, so discovery and verification cannot disagree about `--max-depth`. Symlinked paths are skipped unless `--follow-symlinks`, and broken symlinks are ignored rather than reported. Because `fd -u` consults no ignore files and the `scandir` walker does not either, **hidden and gitignored paths are always considered**; Spotlight/`mdfind` is deliberately not used because indexed search can omit files.
 
 If the native search returns nothing, the scan simply finds no candidates for that root — it does not silently fall back to a full walk.
 
 ### `--exhaustive`
 
-Skips seed discovery and walks every root with Python `os.walk`, classifying every path. Slower, but it will find layouts whose seed filenames are unusual. Useful for validating that the targeted search is not missing anything.
+Skips seed discovery and walks every root with `walk.walk_paths`, classifying every path. Slower, but it will find layouts whose seed filenames are unusual. Useful for validating that the targeted search is not missing anything.
+
+Both modes share the same walker, the same depth predicate, and the same
+path→root attribution. They differ only in which subtrees they start from.
 
 ## Windows registry integration
 
@@ -175,14 +188,16 @@ On Windows the scanner additionally reads **installed-software records** from th
 | App Paths | `SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths` (subkeys ending in `.exe`) | the exe's parent directory |
 | StartMenuInternet | `SOFTWARE\Clients\StartMenuInternet\<client>\shell\open\command` | the browser exe's parent directory |
 
-An uninstall record's root comes from `InstallLocation` when it names an existing directory; otherwise from the `DisplayIcon` executable's parent, unless that executable looks like an uninstaller/setup stub (`uninstall`, `uninst`, `unins000`, `setup`, `update`, …). Registry strings may contain quotes, arguments, or icon indices, which `_parse_registry_exe_path` strips. Only paths that exist on disk are kept. The whole index is built once per scan and is **empty on non-Windows hosts**.
+An uninstall record's root comes from `InstallLocation` when it names an existing directory; otherwise from the `DisplayIcon` executable's parent, unless that executable looks like an uninstaller/setup stub (`uninstall`, `uninst`, `unins000`, `setup`, `update`, …). Registry strings may contain quotes, arguments, or icon indices, which `registry.parse_exe_path` strips. Only paths that exist on disk are kept. The whole index is built once per scan and is **empty on non-Windows hosts**.
 
 Registry data is **never detection evidence**. It is used in exactly two ways:
 
 1. **Enrichment** — for each result whose root equals, or lives under, a registry install directory, matching records are attached to `RuntimeResult.registered_as` (shortest match first), filtered to `DisplayName`, `DisplayVersion`, `Publisher`, and `source` (e.g. `HKLM\SOFTWARE\...`). In `--verbose` these print as `registered:` lines; `--json` includes them; the first record's `DisplayName` becomes the display name in text output.
 2. **Filtering** — `--registry-only` drops candidate roots that have no registry ancestor, so only software the system knows it has installed is reported.
 
-Caveat: `--registry-only` is applied while generating candidate roots from seeds. In `--exhaustive` mode there are no seeds, and the filter is not applied; combine `--registry-only` with the default (seed) mode if you need that restriction.
+`--registry-only` requires the Windows profile and is rejected together with
+`--exhaustive`, since an exhaustive scan builds no seed list to filter. Both
+conditions are argparse errors (exit status 2) rather than silent no-ops.
 
 ## Metadata and display names
 
@@ -210,19 +225,21 @@ Version *strings* are not extracted from macOS binaries or from arbitrary DLLs; 
 | Concern | Where |
 |---|---|
 | Evidence and result dataclasses | `src/chromium_enumerator/model.py` |
-| Platform profiles, evidence tables, root grouping, registry reading, metadata | `src/chromium_enumerator/platforms.py` |
+| Traversal, `FileInfo`, depth predicate | `src/chromium_enumerator/walk.py` |
+| Platform profiles, evidence tables, root grouping, metadata | `src/chromium_enumerator/platforms.py` |
+| Windows registry reads | `src/chromium_enumerator/registry.py` |
+| Windows PE version metadata | `src/chromium_enumerator/pe_metadata.py` |
 | Seed discovery, walking, grouping, scoring, size/entrypoint collection | `src/chromium_enumerator/scanner.py` |
-| Legacy macOS-only `classify_path` shim | `src/chromium_enumerator/detectors.py` |
 | Text/JSON formatting, CLI | `src/chromium_enumerator/cli.py` |
 
 ## Tests
 
 Detection behavior is covered by:
 
-- `tests/test_scanner.py` — macOS layouts: Electron/CEF/QtWebEngine bundles, standalone frameworks, nested helpers, isolated resources, symlink and depth handling, the size demotion, hidden/gitignored candidates, and that seed mode uses the native tool while `--exhaustive` uses `os.walk`.
+- `tests/test_scanner.py` — macOS layouts: Electron/CEF/QtWebEngine bundles, standalone frameworks, nested helpers, isolated resources, symlink and depth handling, the size demotion, hidden/gitignored candidates, single-pass walking, and that seed mode uses the native tool while `--exhaustive` skips it.
+- `tests/test_platforms.py` — profile primitives from pure paths: classification, flat-layout root rules, family inference, and that classification reuses walker stat data.
 - `tests/test_platform_windows.py` — Windows layouts and family mapping; hosted on any OS by injecting `WindowsProfile`.
-- `tests/test_registry.py` — registry path parsing and install-root resolution, plus `--registry-only` and `registered_as` enrichment with a stub registry.
-- `tests/test_detectors.py` — the legacy `classify_path` wrapper and family inference.
+- `tests/test_registry.py` — registry path parsing and install-root resolution, `--registry-only` filtering and flag validation, and `registered_as` enrichment with a stub registry.
 - `tests/test_cli.py` — text and JSON output shapes.
 
 POSIX-dependent suites are skipped on Windows hosts; Windows suites run anywhere because the profile is injected.

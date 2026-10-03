@@ -21,13 +21,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.quip and args.json:
         parser.error("--quip and --json are mutually exclusive: jokes are for humans.")
     if args.quip_count is not None and not args.quip:
-        parser.error("--quip-count only makes sense with --quip: fake Chromium is still Chromium.")
+        parser.error(
+            "--quip-count only makes sense with --quip: fake Chromium is still Chromium."
+        )
     if args.quip_count is not None and args.verbose:
-        parser.error("--quip-count skips scanning, so there is no listing for --verbose to show.")
+        parser.error(
+            "--quip-count skips scanning, so there is no listing for --verbose to show."
+        )
     if args.quip_count is not None and args.quip_count < 0:
-        parser.error("--quip-count must be zero or more. Negative Chromium is a different diagnosis.")
+        parser.error(
+            "--quip-count must be zero or more. Negative Chromium is a different diagnosis."
+        )
 
-    profile = current_profile() if args.platform == "auto" else profile_for_name(args.platform)
+    profile = (
+        current_profile()
+        if args.platform == "auto"
+        else profile_for_name(args.platform)
+    )
+    if args.registry_only and args.exhaustive:
+        parser.error(
+            "--registry-only cannot be combined with --exhaustive: an exhaustive scan "
+            "builds no seed list to filter."
+        )
+    if args.registry_only and profile.name != "windows":
+        parser.error(
+            "--registry-only needs a Windows registry: pass --platform windows."
+        )
+
     if args.quip_count is not None:
         results = fake_results(args.quip_count)
     else:
@@ -80,7 +100,12 @@ def default_roots(profile: PlatformProfile | None = None) -> list[Path]:
     return active.default_roots()
 
 
-def format_text(results, *, verbose: bool = False, profile: PlatformProfile | None = None) -> str:
+def format_text(
+    results: Sequence[RuntimeResult],
+    *,
+    verbose: bool = False,
+    profile: PlatformProfile | None = None,
+) -> str:
     active = profile if profile is not None else current_profile()
     if not results:
         return "No probable Chromium runtimes found."
@@ -128,7 +153,7 @@ def format_text(results, *, verbose: bool = False, profile: PlatformProfile | No
 
 
 def format_quip(
-    results,
+    results: Sequence[RuntimeResult],
     *,
     lang: str,
     seed: int | None = None,
@@ -150,7 +175,11 @@ def format_quip(
     quip = pick_quip(facts, lang, rng)
     body = renderer.render(quip, facts, color=color, lang=lang)
     if explicit_no_color:
-        jab = "检测到 --no-color。懦夫。" if lang == "zh" else "--no-color detected. Coward."
+        jab = (
+            "检测到 --no-color。懦夫。"
+            if lang == "zh"
+            else "--no-color detected. Coward."
+        )
         return f"{jab}\n\n{body}"
     return body
 
@@ -190,8 +219,18 @@ def fake_results(count: int) -> list[RuntimeResult]:
 
 def _fake_names(count: int) -> list[str]:
     base = [
-        "Slack", "Discord", "VSCode", "Spotify", "Teams", "Notion",
-        "Signal", "Figma", "Obsidian", "Postman", "Zoom", "Tidal",
+        "Slack",
+        "Discord",
+        "VSCode",
+        "Spotify",
+        "Teams",
+        "Notion",
+        "Signal",
+        "Figma",
+        "Obsidian",
+        "Postman",
+        "Zoom",
+        "Tidal",
     ]
     names = [base[index % len(base)] for index in range(count)]
     for index in range(len(base), count):
@@ -199,7 +238,7 @@ def _fake_names(count: int) -> list[str]:
     return names
 
 
-def _display_name(result, profile: PlatformProfile) -> str:
+def _display_name(result: RuntimeResult, profile: PlatformProfile) -> str:
     if result.registered_as:
         name = result.registered_as[0].get("DisplayName")
         if name:
@@ -270,12 +309,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--exhaustive",
         action="store_true",
-        help="Use full Python os.walk traversal instead of default targeted seed search.",
+        help="Walk every path with the project's scandir walker instead of the default targeted seed search.",
     )
     parser.add_argument(
         "--registry-only",
         action="store_true",
-        help="Windows only: only report runtimes whose root matches an installed-program registry record (uninstall, App Paths, or StartMenuInternet).",
+        help="Windows only: only report runtimes whose root matches an installed-program registry record (uninstall, App Paths, or StartMenuInternet). Requires --platform windows and is rejected with --exhaustive.",
     )
     parser.add_argument(
         "--quip",

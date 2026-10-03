@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import plistlib
 from collections import Counter
-from contextlib import suppress as _suppress
 from pathlib import Path
 from stat import S_IXGRP, S_IXOTH, S_IXUSR
 from typing import Protocol
 
 from .model import Evidence
+from .pe_metadata import read_windows_metadata
+from .registry import installed_software
+from .walk import FileInfo
 
 MACOS_ENGINE_NAMES: dict[str, str] = {
     "Electron Framework.framework": "electron",
@@ -24,26 +26,32 @@ MACOS_ENGINE_NAMES: dict[str, str] = {
     "libcef.dylib": "cef",
 }
 
-RESOURCE_NAMES = {
-    "icudtl.dat",
-    "resources.pak",
-    "chrome_100_percent.pak",
-    "chrome_200_percent.pak",
-    "v8_context_snapshot.bin",
-    "snapshot_blob.bin",
-    "natives_blob.bin",
-    "devtools_resources.pak",
-    "qtwebengine_resources.pak",
-    "qtwebengine_resources_100p.pak",
-    "qtwebengine_resources_200p.pak",
-}
+RESOURCE_NAMES = frozenset(
+    {
+        "icudtl.dat",
+        "resources.pak",
+        "chrome_100_percent.pak",
+        "chrome_200_percent.pak",
+        "v8_context_snapshot.bin",
+        "snapshot_blob.bin",
+        "natives_blob.bin",
+        "devtools_resources.pak",
+        "qtwebengine_resources.pak",
+        "qtwebengine_resources_100p.pak",
+        "qtwebengine_resources_200p.pak",
+    }
+)
 
-MACOS_HELPER_NAMES = {
-    "chrome_crashpad_handler",
-    "crashpad_handler",
-    "QtWebEngineProcess.app",
-    "QtWebEngineProcess",
-}
+RESOURCE_NAMES_LOWER = frozenset(name.lower() for name in RESOURCE_NAMES)
+
+MACOS_HELPER_NAMES = frozenset(
+    {
+        "chrome_crashpad_handler",
+        "crashpad_handler",
+        "QtWebEngineProcess.app",
+        "QtWebEngineProcess",
+    }
+)
 
 WINDOWS_ENGINE_NAMES: dict[str, str] = {
     "libcef.dll": "cef",
@@ -74,51 +82,50 @@ WINDOWS_FAMILY_BY_EXECUTABLE: dict[str, str] = {
     "chromium.exe": "chromium",
 }
 
-BROWSER_VERSION_DIR_NAMES = {"application", "chrome-bin"}
+BROWSER_VERSION_DIR_NAMES = frozenset({"application", "chrome-bin"})
 
-WINDOWS_LIBRARY_SUFFIXES = {
-    ".dll",
-    ".manifest",
-    ".dat",
-    ".bin",
-    ".pak",
-    ".json",
-    ".asar",
-    ".ico",
-    ".png",
-    ".sig",
-}
-
-WINDOWS_UNINSTALL_KEYS = (
-    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-    r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+WINDOWS_LIBRARY_SUFFIXES = frozenset(
+    {
+        ".dll",
+        ".manifest",
+        ".dat",
+        ".bin",
+        ".pak",
+        ".json",
+        ".asar",
+        ".ico",
+        ".png",
+        ".sig",
+    }
 )
-
-WINDOWS_APP_PATHS_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"
-
-WINDOWS_STARTMENU_INTERNET_KEY = r"SOFTWARE\Clients\StartMenuInternet"
-
-_REGISTRY_PATH_PROPS = ("InstallLocation", "DisplayIcon")
-_REGISTRY_METADATA_PROPS = ("DisplayName", "DisplayVersion", "Publisher")
-
-_UNINSTALLER_STEMS = {
-    "uninstall",
-    "uninstaller",
-    "uninst",
-    "unins000",
-    "unins001",
-    "unsetup",
-    "setup",
-    "update",
-}
 
 MACOS_DEFAULT_ROOTS = ("/Applications", "~/Applications", "/opt/homebrew", "/usr/local")
 
-_WINDOWS_METADATA_ENV_VARS = ("FileDescription", "ProductName", "FileVersion")
+# Directories that carry a flat runtime's payload rather than being runtimes
+# themselves. A file inside one of them belongs to the first ancestor that is
+# not one of them.
+_MACOS_PAYLOAD_DIR_NAMES = frozenset(
+    {
+        "bin",
+        "lib",
+        "Frameworks",
+        "Libraries",
+        "Resources",
+        "Contents",
+        "MacOS",
+        "Helpers",
+        "locales",
+    }
+)
 
 
 class PlatformProfile(Protocol):
-    """Per-OS evidence, grouping, metadata, and seed-search behavior."""
+    """Per-OS evidence, grouping, metadata, and seed-search behavior.
+
+    ``classify_path``, ``runtime_root_for``, and ``is_executable`` accept a
+    ``FileInfo`` when the caller already walked the path: profiles then reuse
+    that stat data instead of touching the filesystem again.
+    """
 
     name: str
     case_insensitive_names: bool
@@ -128,11 +135,13 @@ class PlatformProfile(Protocol):
     find_seed_command_supported: bool
     library_suffixes: frozenset[str]
 
-    def classify_path(self, path: Path) -> Evidence | None: ...
+    def classify_path(
+        self, path: Path, *, info: FileInfo | None = None
+    ) -> Evidence | None: ...
 
-    def runtime_root_for(self, path: Path) -> Path: ...
+    def runtime_root_for(self, path: Path, *, info: FileInfo | None = None) -> Path: ...
 
-    def is_executable(self, path: Path) -> bool: ...
+    def is_executable(self, path: Path, *, info: FileInfo | None = None) -> bool: ...
 
     def read_metadata(self, root: Path) -> dict[str, str]: ...
 
@@ -152,21 +161,14 @@ def infer_family(evidence: list[Evidence]) -> str:
     on Windows every Chromium browser ships the same chrome.dll, so the exe
     name is the only signal distinguishing them.
     """
-    executable_hints = [
-        item.family_hint
-        for item in evidence
-        if item.category == "executable" and item.family_hint
-    ]
-    if executable_hints:
-        return Counter(executable_hints).most_common(1)[0][0]
-
-    engine_hints = [
-        item.family_hint
-        for item in evidence
-        if item.category == "engine" and item.family_hint
-    ]
-    if engine_hints:
-        return Counter(engine_hints).most_common(1)[0][0]
+    for category in ("executable", "engine"):
+        hints = [
+            item.family_hint
+            for item in evidence
+            if item.category == category and item.family_hint
+        ]
+        if hints:
+            return Counter(hints).most_common(1)[0][0]
 
     hints = [item.family_hint for item in evidence if item.family_hint]
     if not hints:
@@ -176,11 +178,7 @@ def infer_family(evidence: list[Evidence]) -> str:
 
 def _classify_resource_path(path: Path, *, case_insensitive: bool) -> Evidence | None:
     name = path.name.lower() if case_insensitive else path.name
-    names = (
-        {resource.lower() for resource in RESOURCE_NAMES}
-        if case_insensitive
-        else RESOURCE_NAMES
-    )
+    names = RESOURCE_NAMES_LOWER if case_insensitive else RESOURCE_NAMES
     if name in names:
         return Evidence("resource", path, name, _family_hint(name))
     parent = path.parent.name
@@ -197,6 +195,10 @@ def _family_hint(resource_name: str) -> str | None:
     return None
 
 
+def _path_is_dir(path: Path, info: FileInfo | None) -> bool:
+    return info.is_dir if info is not None else path.is_dir()
+
+
 class MacOSProfile:
     name = "macos"
     case_insensitive_names = False
@@ -204,11 +206,7 @@ class MacOSProfile:
     library_suffixes = frozenset({".dylib", ".so"})
 
     seed_exact_names = tuple(
-        sorted(
-            frozenset(MACOS_ENGINE_NAMES)
-            | frozenset(RESOURCE_NAMES)
-            | frozenset(MACOS_HELPER_NAMES)
-        )
+        sorted(RESOURCE_NAMES | MACOS_HELPER_NAMES | frozenset(MACOS_ENGINE_NAMES))
     )
     seed_extra_globs: tuple[str, ...] = ("*.pak", "* Helper.app", "* Helper (*).app")
     seed_fd_names_regex = "|".join(
@@ -223,10 +221,9 @@ class MacOSProfile:
         )
     )
 
-    def classify_path(self, path: Path) -> Evidence | None:
-        return self._classify_path(path, is_executable=self.is_executable(path))
-
-    def _classify_path(self, path: Path, *, is_executable: bool) -> Evidence | None:
+    def classify_path(
+        self, path: Path, *, info: FileInfo | None = None
+    ) -> Evidence | None:
         name = path.name
         if name in MACOS_ENGINE_NAMES:
             return Evidence("engine", path, name, MACOS_ENGINE_NAMES[name])
@@ -248,15 +245,20 @@ class MacOSProfile:
         ):
             return Evidence("helper", path, "Helper.app")
 
-        if is_executable and _is_framework_executable(path):
+        # Only now does executability matter, so the name tables above never
+        # pay for a stat the caller did not need.
+        if not self.is_executable(path, info=info):
+            return None
+
+        if _is_framework_executable(path):
             return Evidence("executable", path, "framework executable")
 
-        if is_executable and _is_contents_macos_path(path):
+        if _is_contents_macos_path(path):
             return Evidence("executable", path, "Contents/MacOS executable")
 
         return None
 
-    def runtime_root_for(self, path: Path) -> Path:
+    def runtime_root_for(self, path: Path, *, info: FileInfo | None = None) -> Path:
         app_root = _outermost_bundle(path, ".app")
         if app_root is not None:
             return app_root
@@ -265,9 +267,11 @@ class MacOSProfile:
         if framework_root is not None:
             return framework_root
 
-        return _flat_runtime_root_for(path)
+        return _flat_runtime_root_for(path, info=info)
 
-    def is_executable(self, path: Path) -> bool:
+    def is_executable(self, path: Path, *, info: FileInfo | None = None) -> bool:
+        if info is not None:
+            return info.is_file and bool(info.mode & (S_IXUSR | S_IXGRP | S_IXOTH))
         try:
             mode = path.stat().st_mode
         except OSError:
@@ -281,7 +285,7 @@ class MacOSProfile:
         try:
             with info_plist.open("rb") as plist_file:
                 data = plistlib.load(plist_file)
-        except (OSError, plistlib.InvalidFileException, ValueError):
+        except OSError, plistlib.InvalidFileException, ValueError:
             return {}
 
         metadata: dict[str, str] = {}
@@ -319,7 +323,7 @@ class WindowsProfile:
     name = "windows"
     case_insensitive_names = True
     find_seed_command_supported = False
-    library_suffixes = frozenset(WINDOWS_LIBRARY_SUFFIXES)
+    library_suffixes = WINDOWS_LIBRARY_SUFFIXES
 
     seed_exact_names = tuple(
         sorted(
@@ -327,7 +331,7 @@ class WindowsProfile:
                 *WINDOWS_ENGINE_NAMES,
                 *WINDOWS_ELECTRON_MARKERS,
                 *WINDOWS_HELPER_NAMES,
-                *(resource.lower() for resource in RESOURCE_NAMES),
+                *RESOURCE_NAMES_LOWER,
             }
         )
     )
@@ -336,7 +340,9 @@ class WindowsProfile:
         sorted({*seed_exact_names, r".*\.pak"}, key=len, reverse=True)
     )
 
-    def classify_path(self, path: Path) -> Evidence | None:
+    def classify_path(
+        self, path: Path, *, info: FileInfo | None = None
+    ) -> Evidence | None:
         name = path.name.lower()
 
         if name in WINDOWS_ENGINE_NAMES:
@@ -358,7 +364,7 @@ class WindowsProfile:
 
         return None
 
-    def runtime_root_for(self, path: Path) -> Path:
+    def runtime_root_for(self, path: Path, *, info: FileInfo | None = None) -> Path:
         parts = path.parts
         lowered = tuple(part.lower() for part in parts)
 
@@ -377,18 +383,15 @@ class WindowsProfile:
         if len(lowered) >= 2 and lowered[-2] == "resources":
             return Path(*parts[:-2])
 
-        return path.parent if path.is_file() else path
+        return path if _path_is_dir(path, info) else path.parent
 
-    def is_executable(self, path: Path) -> bool:
+    def is_executable(self, path: Path, *, info: FileInfo | None = None) -> bool:
+        if info is not None:
+            return info.is_file and path.suffix.lower() == ".exe"
         return path.is_file() and path.suffix.lower() == ".exe"
 
     def read_metadata(self, root: Path) -> dict[str, str]:
-        metadata = _read_pe_version_metadata(root)
-        for env_var in _WINDOWS_METADATA_ENV_VARS:
-            value = os.environ.get(f"CHROMIUM_COUNT_STUB_{env_var.upper()}")
-            if value:
-                metadata[env_var] = value
-        return metadata
+        return read_windows_metadata(root)
 
     def registry_roots(self) -> dict[Path, dict[str, str]]:
         """Installed-software records from the Windows registry.
@@ -396,7 +399,7 @@ class WindowsProfile:
         Maps install directories to registration metadata (DisplayName,
         DisplayVersion, Publisher, source). Empty on non-Windows hosts.
         """
-        return _registry_installed_software()
+        return installed_software()
 
     def default_roots(self) -> list[Path]:
         candidates: list[Path] = []
@@ -449,243 +452,23 @@ def _outermost_bundle(path: Path, suffix: str) -> Path | None:
     return min(candidates, key=lambda candidate: len(candidate.parts))
 
 
-def _flat_runtime_root_for(path: Path) -> Path:
-    if path.name == "libcef.dylib" and path.parent.name in {
-        "lib",
-        "Frameworks",
-        "Libraries",
-    }:
-        return path.parent.parent
+def _flat_runtime_root_for(path: Path, *, info: FileInfo | None = None) -> Path:
+    """Runtime root for a path outside any ``.app`` or ``.framework``.
 
-    if path.parent.name == "Resources":
-        return path.parent.parent
-
-    if path.parent.name == "locales" and path.parent.parent.name == "Resources":
-        return path.parent.parent.parent
-
-    return path.parent if path.is_file() else path
-
-
-def _registry_installed_software() -> dict[Path, dict[str, str]]:
-    """Collect install directories and registration metadata from the registry.
-
-    Reads uninstall, App Paths, and StartMenuInternet records (HKLM + HKCU,
-    including the 32-bit WOW6432Node uninstall view) and returns existing
-    install directories keyed by resolved path. Empty on non-Windows hosts or
-    when keys are unreadable.
+    Flat Chromium distributions keep payload under ``bin``, ``lib``,
+    ``Resources``, and friends. Those directories are transparent: the runtime
+    root is the parent of the highest one on the path, so ``app/bin/deep/exe``
+    and ``app/Resources/locales/x.pak`` both belong to ``app``. A path with no
+    payload directory stays in its own directory.
     """
-    if os.name != "nt":
-        return {}
-    try:
-        import winreg
-    except ImportError:
-        return {}
 
-    discovered: dict[str, dict[str, str]] = {}
-
-    def record(root: Path, props: dict[str, str]) -> None:
-        key = _casefold_path(root)
-        merged = discovered.setdefault(key, {"root": str(root)})
-        for name, value in props.items():
-            if value and name not in merged:
-                merged[name] = value
-
-    for hive, hive_label in (
-        (winreg.HKEY_LOCAL_MACHINE, "HKLM"),
-        (winreg.HKEY_CURRENT_USER, "HKCU"),
-    ):
-        for subkey in WINDOWS_UNINSTALL_KEYS:
-            _collect_uninstall_entries(
-                winreg, hive, subkey, f"{hive_label}\\{subkey}", record
-            )
-        for path in _collect_app_paths(winreg, hive):
-            record(path, {})
-        for path in _collect_startmenu_internet(winreg, hive):
-            record(path, {})
-
-    return {Path(props.pop("root")): props for props in discovered.values()}
-
-
-def _collect_uninstall_entries(winreg, hive, subkey, source, record) -> None:
-    with _suppress(OSError), winreg.OpenKey(hive, subkey) as parent:
-        index = 0
-        while True:
-            try:
-                subkey_name = winreg.EnumKey(parent, index)
-                index += 1
-            except OSError:
-                break
-            with _suppress(OSError), winreg.OpenKey(parent, subkey_name) as entry:
-                    props = _read_registry_values(
-                        winreg,
-                        entry,
-                        frozenset(
-                            (*_REGISTRY_PATH_PROPS, *_REGISTRY_METADATA_PROPS)
-                        ),
-                    )
-                    root = _install_root_from_uninstall(props)
-                    if root is None:
-                        continue
-                    metadata = {
-                        name: props[name]
-                        for name in _REGISTRY_METADATA_PROPS
-                        if props.get(name)
-                    }
-                    metadata["source"] = source
-                    record(root, metadata)
-
-
-def _collect_app_paths(winreg, hive) -> list[Path]:
-    roots: list[Path] = []
-    with _suppress(OSError), winreg.OpenKey(hive, WINDOWS_APP_PATHS_KEY) as parent:
-        index = 0
-        while True:
-            try:
-                subkey_name = winreg.EnumKey(parent, index)
-                index += 1
-            except OSError:
-                break
-            if not subkey_name.lower().endswith(".exe"):
-                continue
-            with _suppress(OSError), winreg.OpenKey(parent, subkey_name) as entry:
-                    props = _read_registry_values(winreg, entry, None)
-                    exe = _parse_registry_exe_path(props.get(None))
-                    if exe is not None and exe.exists():
-                        roots.append(exe.parent)
-    return roots
-
-
-def _collect_startmenu_internet(winreg, hive) -> list[Path]:
-    roots: list[Path] = []
-    with _suppress(OSError), winreg.OpenKey(hive, WINDOWS_STARTMENU_INTERNET_KEY) as parent:
-            index = 0
-            while True:
-                try:
-                    client = winreg.EnumKey(parent, index)
-                    index += 1
-                except OSError:
-                    break
-                command_key = f"{client}\\shell\\open\\command"
-                with _suppress(OSError), winreg.OpenKey(parent, command_key) as entry:
-                        props = _read_registry_values(winreg, entry, None)
-                        exe = _parse_registry_exe_path(props.get(None))
-                        if exe is not None and exe.exists():
-                            roots.append(exe.parent)
-    return roots
-
-
-def _read_registry_values(
-    winreg, key, wanted: frozenset[str | None] | None
-) -> dict[str | None, str]:
-    values: dict[str | None, str] = {}
-    index = 0
-    while True:
-        try:
-            name, data, _kind = winreg.EnumValue(key, index)
-            index += 1
-        except OSError:
-            break
-        label = name if name else None
-        if isinstance(data, str) and (wanted is None or label in wanted):
-            values[label] = data
-    return values
-
-
-def _install_root_from_uninstall(props: dict[str | None, str]) -> Path | None:
-    install_location = _parse_registry_dir_path(props.get("InstallLocation"))
-    if install_location is not None and install_location.is_dir():
-        return install_location
-    icon = _parse_registry_exe_path(props.get("DisplayIcon"))
-    if icon is None or not icon.exists():
-        return None
-    if icon.stem.lower() in _UNINSTALLER_STEMS:
-        return None
-    return icon.parent
-
-
-def _parse_registry_dir_path(value) -> Path | None:
-    if not value:
-        return None
-    cleaned = value.strip().strip('"')
-    if not cleaned:
-        return None
-    try:
-        return Path(os.path.expandvars(cleaned))
-    except (OSError, ValueError):
-        return None
-
-
-def _parse_registry_exe_path(value) -> Path | None:
-    """Parse an exe path from a registry string that may include quotes/args."""
-    if not value:
-        return None
-    cleaned = value.strip()
-    if cleaned.startswith('"'):
-        end = cleaned.find('"', 1)
-        cleaned = cleaned[1:end] if end > 1 else cleaned.strip('"')
-    else:
-        exe_index = cleaned.lower().find(".exe")
-        if exe_index >= 0:
-            cleaned = cleaned[: exe_index + 4]
-        else:
-            cleaned = cleaned.split(",")[0].strip().strip('"')
-    if not cleaned:
-        return None
-    try:
-        path = Path(os.path.expandvars(cleaned))
-    except (OSError, ValueError):
-        return None
-    if path.suffix.lower() != ".exe":
-        return None
-    return path
-
-
-def _casefold_path(path: Path) -> str:
-    try:
-        return os.path.normcase(str(path.resolve()))
-    except OSError:
-        return os.path.normcase(str(path))
-
-
-def _read_pe_version_metadata(root: Path) -> dict[str, str]:
-    """Best-effort VS_VERSION_INFO extraction from the root's primary exe.
-
-    Requires the optional `pefile` extra; returns an empty mapping when it is
-    not installed, the exe is missing, or the binary cannot be parsed.
-    """
-    try:
-        import pefile  # pyright: ignore[reportMissingImports]
-    except ImportError:
-        return {}
-
-    candidates = sorted(root.glob("*.exe"))
-    if not candidates:
-        return {}
-
-    wanted = {key.lower(): key for key in _WINDOWS_METADATA_ENV_VARS}
-    metadata: dict[str, str] = {}
-    try:
-        pe = pefile.PE(str(candidates[0]))
-    except (OSError, pefile.PEFormatError):
-        return {}
-    try:
-        for file_info in getattr(pe, "FileInfo", []):
-            for entry in file_info:
-                key = getattr(entry, "Key", b"")
-                if isinstance(key, bytes) and key.decode(
-                    errors="replace"
-                ) != "StringFileInfo":
-                    continue
-                for string_table in getattr(entry, "StringTable", []):
-                    for raw_key, raw_value in string_table.entries.items():
-                        name = raw_key.decode(errors="replace").lower()
-                        if name in wanted:
-                            value = raw_value.decode(errors="replace").strip("\x00 ")
-                            if value:
-                                metadata[wanted[name]] = value
-    except (AttributeError, UnicodeDecodeError, ValueError):
-        return metadata
-    return metadata
+    current = path if _path_is_dir(path, info) else path.parent
+    root = current
+    while current.parent != current:
+        if current.name in _MACOS_PAYLOAD_DIR_NAMES:
+            root = current.parent
+        current = current.parent
+    return root
 
 
 _MACOS_PROFILE = MacOSProfile()

@@ -12,6 +12,7 @@ pytestmark = pytest.mark.skipif(
 
 LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
 
+
 def make_file(path: Path, content: bytes = b"x", *, executable: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -319,18 +320,15 @@ def test_broken_symlink_root_is_ignored_without_warning(tmp_path):
     assert scanner.warnings == []
 
 
-def test_build_result_walks_root_at_most_once(tmp_path, monkeypatch):
-    import os as os_module
+def test_candidate_root_is_walked_once(tmp_path, monkeypatch):
+    import shutil
+
+    import chromium_enumerator.scanner as scanner_module
+    from chromium_enumerator.walk import walk_paths as real_walk_paths
 
     app = make_app_bundle(tmp_path, "WalkApp")
-    make_file(
-        app
-        / "Contents"
-        / "Frameworks"
-        / "Electron Framework.framework"
-        / "Resources"
-        / "icudtl.dat"
-    )
+    framework = app / "Contents" / "Frameworks" / "Electron Framework.framework"
+    make_file(framework / "Resources" / "icudtl.dat")
     make_file(
         app
         / "Contents"
@@ -342,19 +340,46 @@ def test_build_result_walks_root_at_most_once(tmp_path, monkeypatch):
         executable=True,
     )
 
-    calls = []
-    original_walk = os_module.walk
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/fd")
+    monkeypatch.setattr(
+        scanner_module,
+        "_iter_command_paths",
+        lambda command, on_error: iter(
+            [framework, framework / "Resources" / "icudtl.dat"]
+        ),
+    )
 
-    def counting_walk(*args, **kwargs):
-        calls.append(1)
-        yield from original_walk(*args, **kwargs)
+    walks = []
 
-    monkeypatch.setattr(os_module, "walk", counting_walk)
+    def counting_walk(start, **kwargs):
+        walks.append(start)
+        yield from real_walk_paths(start, **kwargs)
+
+    monkeypatch.setattr(scanner_module, "walk_paths", counting_walk)
     [result] = ChromiumScanner().scan([tmp_path])
 
     assert result.entrypoints
     assert result.size_bytes > 0
-    assert len(calls) <= 2
+    # Evidence, entrypoints, and size all come out of this single walk.
+    assert walks == [app]
+
+
+def test_overlapping_scan_roots_are_walked_and_sized_once(tmp_path):
+    app = make_app_bundle(tmp_path, "OnceApp")
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+
+    [once] = ChromiumScanner().scan([app])
+    [twice] = ChromiumScanner().scan([tmp_path, app])
+
+    assert twice.root == once.root
+    assert twice.size_bytes == once.size_bytes
 
 
 def test_warnings_are_cleared_between_scans(tmp_path):
@@ -403,6 +428,35 @@ def test_max_depth_limits_entrypoint_discovery(tmp_path):
     make_file(runtime / "Resources" / "icudtl.dat")
 
     assert ChromiumScanner(max_depth=2).scan([tmp_path]) == []
+
+
+def test_max_depth_is_measured_from_the_scan_root(tmp_path):
+    runtime = tmp_path / "cef-runtime"
+    make_file(runtime / "bin" / "deep" / "cefhost", executable=True)
+    make_file(runtime / "lib" / "libcef.dylib")
+    make_file(runtime / "Resources" / "icudtl.dat")
+    make_large_payload(runtime)
+
+    [result] = ChromiumScanner(max_depth=3).scan([tmp_path])
+
+    assert result.root == runtime
+    assert result.confidence == "high"
+    assert runtime / "bin" / "deep" / "cefhost" in result.entrypoints
+
+
+def test_seed_and_exhaustive_modes_agree_on_flat_layout(tmp_path):
+    runtime = tmp_path / "cef-runtime"
+    make_file(runtime / "bin" / "cefhost", executable=True)
+    make_file(runtime / "lib" / "libcef.dylib")
+    make_file(runtime / "Resources" / "icudtl.dat")
+    make_large_payload(runtime)
+
+    [seeded] = ChromiumScanner().scan([tmp_path])
+    [exhaustive] = ChromiumScanner(exhaustive=True).scan([tmp_path])
+
+    assert seeded.root == exhaustive.root == runtime
+    assert seeded.confidence == exhaustive.confidence == "high"
+    assert seeded.entrypoints == exhaustive.entrypoints
 
 
 def test_helper_app_hint_is_neutral_without_engine_evidence(tmp_path):
@@ -537,7 +591,7 @@ def test_default_scan_uses_targeted_seed_command(tmp_path, monkeypatch):
     assert "large-runtime-payload" not in command_text
 
 
-def test_exhaustive_scan_uses_os_walk_not_seed_command(tmp_path, monkeypatch):
+def test_exhaustive_scan_skips_seed_commands(tmp_path, monkeypatch):
     import shutil
 
     import chromium_enumerator.scanner as scanner_module

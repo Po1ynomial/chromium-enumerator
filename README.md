@@ -67,7 +67,7 @@ Limit recursion depth:
 chromium-count --max-depth 6 /Applications
 ```
 
-Force an exhaustive Python `os.walk` scan instead of the default direct search:
+Force an exhaustive walk instead of the default directed seed search:
 
 ```sh
 chromium-count --exhaustive /Applications
@@ -118,12 +118,14 @@ Tiny fixture-like layouts are demoted to `low` rather than hard-excluded, so `--
 chromium-enumerator/
 ├── src/chromium_enumerator/
 │   ├── cli.py          # argparse CLI and text/JSON formatting
-│   ├── detectors.py    # legacy macOS classify_path wrapper
+│   ├── walk.py         # scandir-based traversal and the single depth predicate
 │   ├── platforms.py    # per-OS evidence, root grouping, metadata, seed rules
+│   ├── registry.py     # Windows installed-software records
+│   ├── pe_metadata.py  # Windows PE version-resource metadata
 │   ├── model.py        # dataclasses for evidence and results
 │   ├── quips.py        # quip facts, tone tiers, and localized copy pools
 │   ├── quip_render.py  # pluggable quip renderers (certificate, bignum)
-│   └── scanner.py      # filesystem walking, grouping, scoring, metadata, sizes
+│   └── scanner.py      # walking, grouping, scoring, metadata, sizes
 ├── tests/              # pytest suite with synthetic macOS and Windows layouts
 └── docs/               # detection.md, cli.md, architecture.md, quips.md
 ```
@@ -136,10 +138,11 @@ Run tests:
 uv run pytest -v
 ```
 
-Lint and type check:
+Lint, format, and type check:
 
 ```sh
 uv run ruff check .
+uv run ruff format --check src tests
 uv run basedpyright
 ```
 
@@ -177,4 +180,4 @@ Full list in [docs/detection.md](docs/detection.md#caveats-and-known-limits). Th
 - Windows metadata (`ProductName`, `FileDescription`, `FileVersion`) requires the optional `pefile` extra (`chromium-enumerator[windows-metadata]`); without it, metadata is empty unless stubbed via `CHROMIUM_COUNT_STUB_*` environment variables. Registry `registered_as` metadata needs no extra but exists only on Windows.
 - Linux layouts are not yet supported; the platform profile mechanism (`platforms.py`) is the extension point.
 - Static detection can still produce false positives or miss heavily customized runtimes.
-- `--registry-only` is ignored in `--exhaustive` mode.
+- `--registry-only` requires `--platform windows` and is rejected with `--exhaustive`, since an exhaustive scan builds no seed list to filter.

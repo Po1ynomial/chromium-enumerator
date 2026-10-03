@@ -27,10 +27,10 @@ A missing root produces a warning on `ChromiumScanner.warnings` and is skipped; 
 |---|---|---|
 | `--platform {auto,macos,windows}` | `auto` | Which detection rules to use. `auto` follows the host OS. Forcing a platform lets you scan a mounted foreign filesystem. |
 | `--include-low-confidence` | off | Include `low`-confidence evidence clusters, normally hidden. |
-| `--max-depth N` | unlimited | Maximum directory depth to recurse below each root. The native seed search is invoked with `max_depth + 1` as a margin and results are re-filtered in Python. |
+| `--max-depth N` | unlimited | Maximum directory depth to recurse below each scan root. The same predicate governs seed discovery and the verification walk. The native seed search is invoked with `max_depth + 1` as a margin and results are re-filtered in Python. |
 | `--follow-symlinks` | off | Follow directory symlinks, with cycle protection. Also disables the `fd` fast path and the size-based confidence cap. |
-| `--exhaustive` | off | Walk every path with Python `os.walk` instead of the targeted seed search. Slower; use to validate the default search. |
-| `--registry-only` | off | Windows only: report only runtimes whose root matches an installed-program registry record. Ignored on macOS, and not applied in `--exhaustive` mode. |
+| `--exhaustive` | off | Walk every path instead of the targeted seed search. Slower; use to validate the default search. |
+| `--registry-only` | off | Windows only: report only runtimes whose root matches an installed-program registry record. Requires `--platform windows`; rejected with `--exhaustive`. |
 
 ### Output
 
@@ -58,6 +58,8 @@ Argument-combination errors are reported by argparse with exit status 2, using t
 - `--quip-count` without `--quip` — `--quip-count only makes sense with --quip: fake Chromium is still Chromium.`
 - `--quip-count` with `--verbose` — `--quip-count skips scanning, so there is no listing for --verbose to show.`
 - negative `--quip-count` — `--quip-count must be zero or more. Negative Chromium is a different diagnosis.`
+- `--registry-only` with `--exhaustive` — `--registry-only cannot be combined with --exhaustive: an exhaustive scan builds no seed list to filter.`
+- `--registry-only` without the Windows profile — `--registry-only needs a Windows registry: pass --platform windows.`
 
 ## Text output
 
@@ -157,8 +159,8 @@ chromium-count --exhaustive /Applications
 # Windows layout from a non-Windows host
 chromium-count --platform windows /mnt/windows/Program\ Files
 
-# only software the registry knows about
-chromium-count --registry-only
+# only software the registry knows about (Windows profile required)
+chromium-count --platform windows --registry-only
 
 # the playful report, pinned so it is reproducible
 chromium-count --quip --lang zh --quip-seed 7 /Applications
