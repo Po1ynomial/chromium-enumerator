@@ -243,6 +243,25 @@ def test_subdirectories_without_engine_evidence_fold_into_the_install(tmp_path):
     )
 
 
+def test_split_payload_and_launcher_rejoin_the_runtime(tmp_path):
+    runtime = tmp_path / "Split"
+    make_file(runtime / "bin" / "app.exe")
+    make_file(runtime / "lib" / "libcef.dll")
+    make_file(runtime / "Resources" / "icudtl.dat")
+    make_large_payload(runtime)
+
+    [result] = windows_scanner(include_low_confidence=True).scan([tmp_path])
+
+    assert result.root == runtime
+    assert result.confidence == "high"
+    assert runtime / "bin" / "app.exe" in result.entrypoints
+    assert {item.category for item in result.evidence} >= {
+        "engine",
+        "resource",
+        "executable",
+    }
+
+
 def test_nested_runtime_keeps_its_bytes_out_of_the_parent(tmp_path):
     outer = tmp_path / "Outer"
     make_file(outer / "Outer.exe")

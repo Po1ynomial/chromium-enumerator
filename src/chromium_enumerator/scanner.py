@@ -180,35 +180,45 @@ class ChromiumScanner:
     ) -> dict[Path, _RuntimeBucket]:
         """Give a runtime the parts of its subtree that are not runtimes themselves.
 
-        A walk attributes every path to its nearest runtime root, but a plain
-        subdirectory such as ``BHO``, ``swiftshader``, or ``legacyPM`` is not
-        one: it holds a lone executable or a pair of marker DLLs and scores
-        ``low`` on its own. Folding those into the nearest ancestor that does
-        score as a runtime keeps the install's entrypoints and bytes with the
-        install instead of stranding them in a phantom result that gets
-        filtered away. A weak bucket with no such ancestor is kept as-is, so
-        ``--include-low-confidence`` still surfaces isolated evidence.
+        A walk attributes every path to its nearest runtime root, which splits
+        a real install whenever its payload is spread out: the launcher in
+        ``bin/``, ``libcef.dll`` in ``lib/``, resources in ``Resources/``.
+        None of those alone scores as a runtime. A bucket that scores ``low``
+        therefore merges into the nearest ancestor that is also a bucket, and
+        the merge repeats until nothing more can move, so the pieces rejoin at
+        the directory that holds them.
+
+        A strong bucket is never merged upward, which is what keeps a nested
+        runtime out of its parent's size. A weak bucket with no ancestor bucket
+        stays put, so isolated evidence still shows up under
+        ``--include-low-confidence``.
         """
 
-        strong: dict[Path, _RuntimeBucket] = {}
-        weak: dict[Path, _RuntimeBucket] = {}
-        for root, bucket in buckets.items():
-            evidence = _dedupe_evidence(bucket.evidence)
-            scored = _score_confidence(evidence, sorted(bucket.entrypoints, key=str))
-            (weak if scored == "low" else strong)[root] = bucket
+        case_insensitive = self.profile.case_insensitive_names
+        active = dict(buckets)
+        indexes = {_bucket_key(root, case_insensitive): root for root in active}
+        ordered = sorted(active, key=lambda path: len(path.parts), reverse=True)
 
-        for root, bucket in weak.items():
-            parent = _nearest_ancestor(
-                root, strong, case_insensitive=self.profile.case_insensitive_names
-            )
-            if parent is None:
-                strong[root] = bucket
-                continue
-            target = strong[parent]
-            target.evidence.extend(bucket.evidence)
-            target.entrypoints |= bucket.entrypoints
-            target.size_bytes += bucket.size_bytes
-        return strong
+        progress = True
+        while progress:
+            progress = False
+            for root in ordered:
+                if root not in active:
+                    continue
+                bucket = active[root]
+                if not _is_weak(bucket):
+                    continue
+                parent = _nearest_bucket_ancestor(root, indexes, case_insensitive)
+                if parent is None:
+                    continue
+                target = active[parent]
+                target.evidence.extend(bucket.evidence)
+                target.entrypoints |= bucket.entrypoints
+                target.size_bytes += bucket.size_bytes
+                del active[root]
+                del indexes[_bucket_key(root, case_insensitive)]
+                progress = True
+        return active
 
     def _build_result(self, root: Path, bucket: _RuntimeBucket) -> RuntimeResult:
         evidence = _dedupe_evidence(bucket.evidence)
@@ -482,16 +492,25 @@ def _is_covered(path: Path, parents: Iterable[Path], case_insensitive: bool) -> 
     return False
 
 
-def _nearest_ancestor(
-    path: Path, candidates: Iterable[Path], *, case_insensitive: bool
+def _is_weak(bucket: _RuntimeBucket) -> bool:
+    evidence = _dedupe_evidence(bucket.evidence)
+    entrypoints = sorted(bucket.entrypoints, key=str)
+    return _score_confidence(evidence, entrypoints) == "low"
+
+
+def _bucket_key(path: Path, case_insensitive: bool) -> str:
+    text = str(path)
+    return text.lower() if case_insensitive else text
+
+
+def _nearest_bucket_ancestor(
+    path: Path, indexes: dict[str, Path], case_insensitive: bool
 ) -> Path | None:
-    best: Path | None = None
-    for candidate in candidates:
-        if candidate == path or not _is_covered(path, [candidate], case_insensitive):
-            continue
-        if best is None or len(candidate.parts) > len(best.parts):
-            best = candidate
-    return best
+    for parent in path.parents:
+        found = indexes.get(_bucket_key(parent, case_insensitive))
+        if found is not None:
+            return found
+    return None
 
 
 def _dedupe_evidence(evidence: list[Evidence]) -> list[Evidence]:
