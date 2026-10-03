@@ -12,6 +12,9 @@ from chromium_enumerator.scanner import (
 
 LARGE_RUNTIME_BYTES = 6 * 1024 * 1024
 
+NON_ASCII_ROOT = "扫描根 目录"
+NON_ASCII_APP = "测试应用"
+
 
 def make_file(path: Path, content: bytes = b"x") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -25,6 +28,18 @@ def make_large_payload(root: Path) -> Path:
     with payload.open("wb") as payload_file:
         payload_file.truncate(LARGE_RUNTIME_BYTES)
     return payload
+
+
+def make_non_ascii_runtime(root: Path) -> Path:
+    """A CEF install whose every path component is non-ASCII, bar the suffix."""
+
+    runtime = root / NON_ASCII_APP
+    make_file(runtime / f"{NON_ASCII_APP}.exe")
+    make_file(runtime / "libcef.dll")
+    make_file(runtime / "icudtl.dat")
+    make_file(runtime / "locales" / "zh-CN.pak")
+    make_large_payload(runtime)
+    return runtime
 
 
 def windows_scanner(**kwargs) -> ChromiumScanner:
@@ -234,6 +249,50 @@ def test_nested_version_dir_resources_stay_under_application(tmp_path):
     [result] = results
     assert result.family == "edge"
     assert result.confidence == "high"
+
+
+def test_detects_runtime_under_non_ascii_paths(tmp_path):
+    root = tmp_path / NON_ASCII_ROOT
+    runtime = make_non_ascii_runtime(root)
+
+    [result] = windows_scanner().scan([root])
+
+    assert result.root == runtime
+    assert result.family == "cef"
+    assert result.confidence == "high"
+    assert runtime / f"{NON_ASCII_APP}.exe" in result.entrypoints
+    assert {item.path for item in result.evidence} >= {
+        runtime / "libcef.dll",
+        runtime / "icudtl.dat",
+        runtime / "locales" / "zh-CN.pak",
+    }
+
+
+def test_cli_json_round_trips_non_ascii_paths(tmp_path, capsys):
+    root = tmp_path / NON_ASCII_ROOT
+    runtime = make_non_ascii_runtime(root)
+
+    assert main(["--platform", "windows", "--json", str(root)]) == 0
+
+    [entry] = json.loads(capsys.readouterr().out)
+    # JSON escapes non-ASCII on the wire, so this asserts the exact round trip.
+    assert entry["root"] == str(runtime)
+    assert entry["entrypoints"] == [str(runtime / f"{NON_ASCII_APP}.exe")]
+    assert {item["path"] for item in entry["evidence"]} >= {
+        str(runtime / "libcef.dll"),
+        str(runtime / "icudtl.dat"),
+    }
+
+
+def test_cli_text_output_keeps_non_ascii_paths(tmp_path, capsys):
+    root = tmp_path / NON_ASCII_ROOT
+    runtime = make_non_ascii_runtime(root)
+
+    assert main(["--platform", "windows", str(root)]) == 0
+
+    output = capsys.readouterr().out
+    assert str(runtime) in output
+    assert "high confidence" in output
 
 
 def test_cli_platform_windows_scans_windows_layout(tmp_path, capsys):

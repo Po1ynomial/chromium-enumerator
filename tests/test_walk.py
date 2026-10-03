@@ -119,6 +119,20 @@ def test_directory_junctions_are_treated_as_links(tmp_path):
 
 
 @needs_symlinks
+def test_is_link_distinguishes_links_from_plain_entries(tmp_path):
+    make_file(tmp_path / "file.txt")
+    (tmp_path / "dir").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "dir", target_is_directory=True)
+    (tmp_path / "broken").symlink_to(tmp_path / "gone")
+
+    assert is_link(tmp_path / "link")
+    assert is_link(tmp_path / "broken")
+    assert not is_link(tmp_path / "dir")
+    assert not is_link(tmp_path / "file.txt")
+    assert not is_link(tmp_path / "missing")
+
+
+@needs_symlinks
 def test_broken_symlinks_are_skipped_silently(tmp_path):
     make_file(tmp_path / "real.txt")
     (tmp_path / "dead.txt").symlink_to(tmp_path / "missing.txt")

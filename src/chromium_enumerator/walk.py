@@ -7,10 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-# Windows reports directory junctions and other reparse points as ordinary
-# directories with this attribute set, not as symlinks.
-_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-
 
 class _ScandirIterator(Protocol):
     """Just enough of ``os.scandir``'s return value for the walk to close it."""
@@ -39,15 +35,12 @@ class FileInfo:
 def is_link(path: Path) -> bool:
     """Whether ``path`` is a symlink, or on Windows a directory junction.
 
-    Junctions are reparse points, and Python reports them as plain
-    directories, so ``Path.is_symlink()`` misses them.
+    Python reports a junction as an ordinary directory, so
+    ``Path.is_symlink()`` misses it. ``os.path.isjunction()`` is the
+    documented test and is always false where junctions do not exist.
     """
 
-    try:
-        result = path.lstat()
-    except OSError:
-        return False
-    return stat.S_ISLNK(result.st_mode) or _is_reparse_point(result)
+    return path.is_symlink() or os.path.isjunction(path)
 
 
 def walk_paths(
@@ -158,14 +151,14 @@ def within_depth(root: Path, path: Path, max_depth: int | None) -> bool:
 
 
 def _info_for_path(path: Path, *, follow_symlinks: bool) -> FileInfo | None:
+    is_link = path.is_symlink() or os.path.isjunction(path)
+    if is_link and not follow_symlinks:
+        return FileInfo(path, False, False, True, 0, 0)
     try:
-        is_symlink = path.is_symlink()
-        if is_symlink and not follow_symlinks:
-            return FileInfo(path, False, False, True, 0, 0)
         result = path.stat() if follow_symlinks else path.lstat()
     except OSError:
         return None
-    return _info(path, result, is_symlink=is_symlink)
+    return _info(path, result, is_link=is_link)
 
 
 def _info_for_entry(
@@ -173,32 +166,28 @@ def _info_for_entry(
 ) -> FileInfo | None:
     path = Path(entry.path)
     try:
-        is_symlink = entry.is_symlink()
+        is_link = entry.is_symlink() or entry.is_junction()
     except OSError:
         return None
-    if is_symlink and not follow_symlinks:
+    if is_link and not follow_symlinks:
         return FileInfo(path, False, False, True, 0, 0)
     try:
         result = entry.stat(follow_symlinks=follow_symlinks)
     except OSError:
         return None
-    return _info(path, result, is_symlink=is_symlink)
+    return _info(path, result, is_link=is_link)
 
 
-def _info(path: Path, result: os.stat_result, *, is_symlink: bool) -> FileInfo:
+def _info(path: Path, result: os.stat_result, *, is_link: bool) -> FileInfo:
     is_file = stat.S_ISREG(result.st_mode)
     return FileInfo(
         path=path,
         is_dir=stat.S_ISDIR(result.st_mode),
         is_file=is_file,
-        is_link=is_symlink or _is_reparse_point(result),
+        is_link=is_link,
         size=result.st_size if is_file else 0,
         mode=result.st_mode,
     )
-
-
-def _is_reparse_point(result: os.stat_result) -> bool:
-    return bool(getattr(result, "st_file_attributes", 0) & _REPARSE_POINT)
 
 
 def _identity(path: Path) -> str:

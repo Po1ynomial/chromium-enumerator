@@ -546,6 +546,39 @@ def test_hidden_and_gitignored_candidates_are_not_omitted(tmp_path):
     assert result.root == app
 
 
+def test_finds_runtime_under_non_ascii_paths(tmp_path):
+    # The native seed search takes the scan root as an argv element and hands
+    # back paths as bytes, so non-ASCII has to survive both directions.
+    root = tmp_path / "应用 目录"
+    app = make_app_bundle(root, "测试应用")
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "Electron Framework.framework"
+        / "Resources"
+        / "icudtl.dat"
+    )
+    make_file(
+        app
+        / "Contents"
+        / "Frameworks"
+        / "测试应用 Helper.app"
+        / "Contents"
+        / "MacOS"
+        / "测试应用 Helper",
+        executable=True,
+    )
+
+    [result] = ChromiumScanner().scan([root])
+
+    assert result.root == app
+    assert result.family == "electron"
+    assert result.confidence == "high"
+    assert app / "Contents" / "MacOS" / "测试应用" in result.entrypoints
+    assert result.metadata["CFBundleName"] == "测试应用"
+
+
 def test_default_scan_uses_targeted_seed_command(tmp_path, monkeypatch):
     import shutil
 
