@@ -12,7 +12,9 @@ from chromium_enumerator.quips import build_facts, pick_quip
 from tests.helpers import make_results
 
 
-def render(style: str, count: int, lang: str = "en", seed: int = 0, color: bool = False):
+def render(
+    style: str, count: int, lang: str = "en", seed: int = 0, color: bool = False
+):
     facts = build_facts(make_results(count))
     quip = pick_quip(facts, lang, random.Random(seed))
     return RENDERERS[style].render(quip, facts, color=color, lang=lang), quip
@@ -107,7 +109,9 @@ def test_digit_font_glyphs_are_uniformly_sized():
     for digit, rows in _DIGIT_FONT.items():
         assert len(rows) == 6, digit
         lengths = {len(row) for row in rows}
-        assert lengths == {_GLYPH_WIDTH}, f"digit {digit} rows are ragged: {sorted(lengths)}"
+        assert lengths == {_GLYPH_WIDTH}, (
+            f"digit {digit} rows are ragged: {sorted(lengths)}"
+        )
         widths[digit] = lengths
     assert widths  # sanity
     assert all(len(row) == _GLYPH_WIDTH for row in _FALLBACK_DIGIT_ROW)

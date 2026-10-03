@@ -87,7 +87,9 @@ def _family_counts(results: Sequence[RuntimeResult]) -> dict[str, int]:
     return counts
 
 
-def build_facts(results: Sequence[RuntimeResult], *, dot_style: str = "face") -> QuipFacts:
+def build_facts(
+    results: Sequence[RuntimeResult], *, dot_style: str = "face"
+) -> QuipFacts:
     """Extract everything a quip might want to joke about from scan results."""
 
     dot = _DOT_FACE if dot_style == "face" else _DOT_BLOCK
@@ -518,9 +520,13 @@ def validate_copy() -> list[str]:
             if not tier.pool[lang]:
                 problems.append(f"tier {tier.id!r}: empty pool for {lang!r}")
             problems.extend(
-                _validate_entries(tier.pool[lang], f"tier {tier.id!r} [{lang}]", valid_placeholders)
+                _validate_entries(
+                    tier.pool[lang], f"tier {tier.id!r} [{lang}]", valid_placeholders
+                )
             )
-        reference_keys = set(tier.pool[languages[0]][0]) if tier.pool.get(languages[0]) else set()
+        reference_keys = (
+            set(tier.pool[languages[0]][0]) if tier.pool.get(languages[0]) else set()
+        )
         for lang in languages[1:]:
             for index, entry in enumerate(tier.pool.get(lang, ())):
                 if set(entry) != reference_keys:
@@ -537,7 +543,9 @@ def validate_copy() -> list[str]:
                         if any(char.isdigit() for char in text):
                             coverage = f"{tier.threshold}-{next_threshold - 1}"
                             detail = f"literal digit in a multi-count tier (covers {coverage}); use {{count}}"
-                            problems.append(f"tier {tier.id!r} [{lang}] entry {entry_index} field {key!r}: {detail}")
+                            problems.append(
+                                f"tier {tier.id!r} [{lang}] entry {entry_index} field {key!r}: {detail}"
+                            )
 
     for count, (tier_id, pools) in SPECIAL_QUIPS.items():
         if tier_id not in _TIER_BY_ID:
@@ -547,7 +555,9 @@ def validate_copy() -> list[str]:
                 problems.append(f"special {count}: missing pool for {lang!r}")
                 continue
             problems.extend(
-                _validate_entries(pools[lang], f"special {count} [{lang}]", valid_placeholders)
+                _validate_entries(
+                    pools[lang], f"special {count} [{lang}]", valid_placeholders
+                )
             )
 
     return problems

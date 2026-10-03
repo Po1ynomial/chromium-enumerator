@@ -22,7 +22,4 @@ def make_result(name: str, size: int, family: str = "electron") -> RuntimeResult
 def make_results(count: int, size: int = DEFAULT_RUNTIME_BYTES) -> list[RuntimeResult]:
     """``count`` synthetic Electron results of equal size."""
 
-    return [
-        make_result(f"App{index}", size)
-        for index in range(count)
-    ]
+    return [make_result(f"App{index}", size) for index in range(count)]

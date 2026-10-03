@@ -64,7 +64,13 @@ def test_copy_guard_detects_hardcoded_digits():
 
     original = quips._POOLS["few"]["en"]
     quips._POOLS["few"]["en"] = (
-        {"headline": "3 instances.", "tagline": "oops", "diagnosis": "d", "prognosis": "p", "closing": "c"},
+        {
+            "headline": "3 instances.",
+            "tagline": "oops",
+            "diagnosis": "d",
+            "prognosis": "p",
+            "closing": "c",
+        },
     )
     try:
         assert any("literal digit" in problem for problem in quips.validate_copy())

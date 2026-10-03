@@ -13,7 +13,15 @@ def test_quip_and_json_are_mutually_exclusive(capsys):
 
 def test_quip_renders_for_empty_scan_and_exits_zero(tmp_path, capsys):
     exit_code = main(
-        ["--quip", "--no-color", "--lang", "en", "--quip-style", "certificate", str(tmp_path)]
+        [
+            "--quip",
+            "--no-color",
+            "--lang",
+            "en",
+            "--quip-style",
+            "certificate",
+            str(tmp_path),
+        ]
     )
     assert exit_code == 0
     out = capsys.readouterr().out
@@ -33,7 +41,9 @@ def test_quip_exit_code_matches_count(tmp_path, capsys, monkeypatch):
             return make_results(42)
 
     monkeypatch.setattr(cli, "ChromiumScanner", FakeScanner)
-    exit_code = main(["--quip", "--no-color", "--lang", "en", "--quip-seed", "0", str(tmp_path)])
+    exit_code = main(
+        ["--quip", "--no-color", "--lang", "en", "--quip-seed", "0", str(tmp_path)]
+    )
     assert exit_code == 42
     out = capsys.readouterr().out
     assert "universe" in out
@@ -54,7 +64,17 @@ def test_lang_auto_resolution():
 
 
 def test_zh_quip_output(tmp_path, capsys):
-    main(["--quip", "--no-color", "--lang", "zh", "--quip-style", "certificate", str(tmp_path)])
+    main(
+        [
+            "--quip",
+            "--no-color",
+            "--lang",
+            "zh",
+            "--quip-style",
+            "certificate",
+            str(tmp_path),
+        ]
+    )
     out = capsys.readouterr().out
     assert "诊 断 证 书" in out
 
@@ -100,7 +120,9 @@ def test_explicit_style_wins_over_auto():
     assert "CERTIFICATE" not in out
     assert "Chromium instances" in out
 
-    out = format_quip(make_results(10), lang="en", seed=0, style="certificate", color=False)
+    out = format_quip(
+        make_results(10), lang="en", seed=0, style="certificate", color=False
+    )
     assert "CERTIFICATE" in out
 
 
@@ -122,7 +144,16 @@ def test_quip_count_rejects_verbose_and_negative(capsys):
 
 def test_quip_count_zero_renders_zero_tier(capsys):
     exit_code = main(
-        ["--quip", "--no-color", "--lang", "zh", "--quip-count", "0", "--quip-style", "certificate"]
+        [
+            "--quip",
+            "--no-color",
+            "--lang",
+            "zh",
+            "--quip-count",
+            "0",
+            "--quip-style",
+            "certificate",
+        ]
     )
     assert exit_code == 0
     out = capsys.readouterr().out
