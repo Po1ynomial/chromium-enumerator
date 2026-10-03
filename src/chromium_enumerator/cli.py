@@ -4,7 +4,9 @@ import argparse
 import json
 import os
 import random
+import sys
 from collections.abc import Mapping, Sequence
+from contextlib import suppress as _suppress
 from pathlib import Path
 
 from .model import RuntimeResult
@@ -15,6 +17,7 @@ from .scanner import ChromiumScanner
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_stdout()
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -93,6 +96,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(format_text(results, verbose=args.verbose, profile=profile))
     return 0
+
+
+def _configure_stdout() -> None:
+    """Stop an unencodable glyph from killing a report.
+
+    A non-UTF-8 console (a GBK code page, say) cannot encode the certificate
+    renderer's dot glyph, and CPython's default strict error handler turns
+    that into a traceback. Replacing the character is better than losing the
+    whole report.
+    """
+
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is None:
+        return
+    with _suppress(OSError, ValueError):
+        reconfigure(errors="replace")
 
 
 def default_roots(profile: PlatformProfile | None = None) -> list[Path]:

@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import pytest
 
 from chromium_enumerator.cli import format_quip, main, resolve_lang
@@ -140,6 +144,37 @@ def test_quip_count_rejects_verbose_and_negative(capsys):
     with pytest.raises(SystemExit):
         main(["--quip", "--quip-count", "-1"])
     assert "zero or more" in capsys.readouterr().err
+
+
+def test_quip_survives_a_non_utf8_console():
+    # The certificate renderer draws ◉, which a GBK code page cannot encode.
+    # Strict encoding would turn the whole report into a traceback.
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONUTF8"}
+    env["PYTHONIOENCODING"] = "gbk"
+    script = (
+        "import sys; from chromium_enumerator.cli import main; "
+        "sys.exit(main(['--quip', '--no-color', '--lang', 'en', "
+        "'--quip-style', 'certificate', '--quip-count', '5']))"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, env=env, check=False
+    )
+
+    assert completed.returncode == 5
+    assert b"Traceback" not in completed.stderr
+    assert b"CERTIFICATE" in completed.stdout
+
+
+def test_stdout_without_reconfigure_is_tolerated(monkeypatch):
+    class Plain:
+        pass
+
+    monkeypatch.setattr(sys, "stdout", Plain())
+
+    from chromium_enumerator.cli import _configure_stdout
+
+    _configure_stdout()  # must not raise
 
 
 def test_quip_count_zero_renders_zero_tier(capsys):

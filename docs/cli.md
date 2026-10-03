@@ -138,6 +138,8 @@ Notes:
 
 `--no-color` and `NO_COLOR` differ in tone only: the explicit flag prints a "Coward." jab, the environment variable does not.
 
+Text output is encoded with the interpreter's stdout encoding. Characters the code page cannot represent are written as `?` instead of raising, so `--quip` still works on a GBK console that cannot encode the certificate renderer's `◉`. Set `PYTHONUTF8=1` or switch the console to UTF-8 to see them. `--json` escapes non-ASCII, so it is never affected.
+
 ## Examples
 
 ```sh
