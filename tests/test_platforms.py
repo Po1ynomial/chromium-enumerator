@@ -10,7 +10,7 @@ def make_info(path: Path, *, is_dir: bool = False, mode: int = 0o644) -> FileInf
         path=path,
         is_dir=is_dir,
         is_file=not is_dir,
-        is_symlink=False,
+        is_link=False,
         size=1,
         mode=mode,
     )

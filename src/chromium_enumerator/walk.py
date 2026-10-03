@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+# Windows reports directory junctions and other reparse points as ordinary
+# directories with this attribute set, not as symlinks.
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
 
 class _ScandirIterator(Protocol):
     """Just enough of ``os.scandir``'s return value for the walk to close it."""
@@ -27,9 +31,23 @@ class FileInfo:
     path: Path
     is_dir: bool
     is_file: bool
-    is_symlink: bool
+    is_link: bool
     size: int
     mode: int
+
+
+def is_link(path: Path) -> bool:
+    """Whether ``path`` is a symlink, or on Windows a directory junction.
+
+    Junctions are reparse points, and Python reports them as plain
+    directories, so ``Path.is_symlink()`` misses them.
+    """
+
+    try:
+        result = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISLNK(result.st_mode) or _is_reparse_point(result)
 
 
 def walk_paths(
@@ -46,9 +64,10 @@ def walk_paths(
     yielded lives in a directory at level ``max_depth``. ``root`` is yielded
     first, whether it is a directory or a file.
 
-    Symlinked entries are skipped unless ``follow_symlinks`` is set. Broken
-    symlinks are always skipped silently. Directory cycles are never entered
-    twice, which is what makes ``follow_symlinks`` safe.
+    Links (symlinks, and on Windows junctions) are skipped unless
+    ``follow_symlinks`` is set. Broken links are always skipped silently.
+    Directory cycles are never entered twice, which is what makes
+    ``follow_symlinks`` safe.
     """
 
     def report(message: str) -> None:
@@ -60,6 +79,8 @@ def walk_paths(
         return
     yield root_info
     if not root_info.is_dir:
+        return
+    if root_info.is_link and not follow_symlinks:
         return
 
     visited: set[str] = set()
@@ -90,15 +111,14 @@ def walk_paths(
             info = _info_for_entry(entry, follow_symlinks=follow_symlinks)
             if info is None:
                 continue
-            if info.is_symlink and not follow_symlinks:
+            if info.is_link and not follow_symlinks:
                 continue
             if info.is_dir:
                 if max_depth is not None and depth + 1 > max_depth:
                     continue
                 if follow_symlinks:
-                    # A plain tree cannot cycle, and symlinked directories are
-                    # already skipped when not following, so the guard only
-                    # matters when links are followed.
+                    # A plain tree cannot cycle, and links are already skipped
+                    # when not following, so the guard only matters here.
                     key = _identity(info.path)
                     if key in visited:
                         continue
@@ -151,17 +171,18 @@ def _info_for_path(path: Path, *, follow_symlinks: bool) -> FileInfo | None:
 def _info_for_entry(
     entry: os.DirEntry[str], *, follow_symlinks: bool
 ) -> FileInfo | None:
+    path = Path(entry.path)
     try:
         is_symlink = entry.is_symlink()
     except OSError:
         return None
     if is_symlink and not follow_symlinks:
-        return FileInfo(Path(entry.path), False, False, True, 0, 0)
+        return FileInfo(path, False, False, True, 0, 0)
     try:
         result = entry.stat(follow_symlinks=follow_symlinks)
     except OSError:
         return None
-    return _info(Path(entry.path), result, is_symlink=is_symlink)
+    return _info(path, result, is_symlink=is_symlink)
 
 
 def _info(path: Path, result: os.stat_result, *, is_symlink: bool) -> FileInfo:
@@ -170,14 +191,18 @@ def _info(path: Path, result: os.stat_result, *, is_symlink: bool) -> FileInfo:
         path=path,
         is_dir=stat.S_ISDIR(result.st_mode),
         is_file=is_file,
-        is_symlink=is_symlink,
+        is_link=is_symlink or _is_reparse_point(result),
         size=result.st_size if is_file else 0,
         mode=result.st_mode,
     )
 
 
+def _is_reparse_point(result: os.stat_result) -> bool:
+    return bool(getattr(result, "st_file_attributes", 0) & _REPARSE_POINT)
+
+
 def _identity(path: Path) -> str:
-    """Stable identity for symlink cycle detection.
+    """Stable identity for link cycle detection.
 
     Inodes are useless here on Windows: ``DirEntry.stat()`` fills its result
     from the directory scan, where ``st_ino`` and ``st_dev`` are zero, so an

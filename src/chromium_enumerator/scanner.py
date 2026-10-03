@@ -12,7 +12,7 @@ from pathlib import Path
 from .model import Confidence, Evidence, RuntimeResult
 from .platforms import PlatformProfile, current_profile, infer_family
 from .registry import casefold_path
-from .walk import FileInfo, depth_from, walk_paths, within_depth
+from .walk import FileInfo, depth_from, is_link, walk_paths, within_depth
 
 _EXCEPTIONALLY_SMALL_RUNTIME_BYTES = 5 * 1024 * 1024
 
@@ -53,12 +53,12 @@ class ChromiumScanner:
 
         for root_value in roots:
             root = Path(root_value).expanduser()
-            if root.is_symlink() and not root.exists():
+            if is_link(root) and not root.exists():
                 continue
             if not root.exists():
                 self.warnings.append(f"missing root: {root}")
                 continue
-            if root.is_symlink() and not self.follow_symlinks:
+            if is_link(root) and not self.follow_symlinks:
                 self.warnings.append(f"skipped symlink root: {root}")
                 continue
 
@@ -467,7 +467,7 @@ def _normalize_external_path(root: Path, path: Path) -> Path:
 
 
 def _should_skip_symlink(path: Path, *, follow_symlinks: bool) -> bool:
-    return path.is_symlink() and (not follow_symlinks or not path.exists())
+    return is_link(path) and (not follow_symlinks or not path.exists())
 
 
 def _dedupe_nested_roots(roots: set[Path], *, case_insensitive: bool) -> list[Path]:

@@ -1,12 +1,16 @@
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from chromium_enumerator.walk import walk_paths
+from chromium_enumerator.walk import is_link, walk_paths
 
 needs_symlinks = pytest.mark.skipif(
     os.name != "posix", reason="symlink fixtures need POSIX symlink support"
+)
+needs_junctions = pytest.mark.skipif(
+    os.name != "nt", reason="directory junctions are Windows-only"
 )
 
 
@@ -89,6 +93,29 @@ def test_following_symlinks_visits_cycles_once(tmp_path):
 
     assert followed == single
     assert not any("loop" in parts for parts in followed)
+
+
+@needs_junctions
+def test_directory_junctions_are_treated_as_links(tmp_path):
+    runtime = tmp_path / "runtime"
+    make_file(runtime / "bin" / "tool.exe")
+    make_file(runtime / "lib" / "libcef.dll")
+    make_file(runtime / "Resources" / "icudtl.dat")
+    junction = runtime / "loop"
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(runtime)],
+        capture_output=True,
+        check=False,
+    )
+    if created.returncode != 0:
+        pytest.skip("could not create a directory junction")
+
+    # Python reports a junction as a plain directory, so it must be treated
+    # as a link explicitly: otherwise the walk descends into it forever.
+    assert junction.is_symlink() is False
+    assert is_link(junction)
+    assert collected(runtime) == collected(runtime, follow_symlinks=True)
+    assert not any("loop" in parts for parts in collected(runtime))
 
 
 @needs_symlinks

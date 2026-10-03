@@ -28,7 +28,7 @@ A missing root produces a warning on `ChromiumScanner.warnings` and is skipped; 
 | `--platform {auto,macos,windows}` | `auto` | Which detection rules to use. `auto` follows the host OS. Forcing a platform lets you scan a mounted foreign filesystem. |
 | `--include-low-confidence` | off | Include `low`-confidence evidence clusters, normally hidden. |
 | `--max-depth N` | unlimited | Maximum directory depth to recurse below each scan root. The same predicate governs seed discovery and the verification walk. The native seed search is invoked with `max_depth + 1` as a margin and results are re-filtered in Python. |
-| `--follow-symlinks` | off | Follow directory symlinks, with cycle protection. Also disables the `fd` fast path and the size-based confidence cap. |
+| `--follow-symlinks` | off | Follow directory symlinks, and on Windows directory junctions and other reparse points, with cycle protection. Also disables the `fd` fast path and the size-based confidence cap. |
 | `--exhaustive` | off | Walk every path instead of the targeted seed search. Slower; use to validate the default search. |
 | `--registry-only` | off | Windows only: report only runtimes whose root matches an installed-program registry record. Requires `--platform windows`; rejected with `--exhaustive`. |
 

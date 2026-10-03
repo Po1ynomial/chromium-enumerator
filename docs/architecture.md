@@ -57,7 +57,7 @@ class FileInfo:
     path: Path
     is_dir: bool
     is_file: bool
-    is_symlink: bool
+    is_link: bool
     size: int
     mode: int
 ```
