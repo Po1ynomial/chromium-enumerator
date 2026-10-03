@@ -125,6 +125,30 @@ def test_infer_family_ranks_engine_hints_above_helper_hints():
     assert infer_family(evidence) == "electron"
 
 
+def test_infer_family_needs_two_distinct_markers_for_electron():
+    single = [
+        Evidence("executable", Path("/app/app.exe"), "app.exe"),
+        Evidence("electron-marker", Path("/app/ffmpeg.dll"), "ffmpeg.dll", "electron"),
+        Evidence("resource", Path("/app/resources.pak"), "resources.pak"),
+    ]
+    repeated = [
+        Evidence("electron-marker", Path("/app/ffmpeg.dll"), "ffmpeg.dll", "electron"),
+        Evidence(
+            "electron-marker", Path("/app/sub/ffmpeg.dll"), "ffmpeg.dll", "electron"
+        ),
+    ]
+    full_set = [
+        Evidence("electron-marker", Path("/app/ffmpeg.dll"), "ffmpeg.dll", "electron"),
+        Evidence("electron-marker", Path("/app/libegl.dll"), "libegl.dll", "electron"),
+    ]
+
+    # One marker is collateral that every Chromium build can ship, so it names
+    # nothing; the set is Electron's only Windows signature.
+    assert infer_family(single) == "chromium"
+    assert infer_family(repeated) == "chromium"
+    assert infer_family(full_set) == "electron"
+
+
 def test_infer_family_falls_back_to_chromium():
     evidence = [Evidence("executable", Path("/app/launcher"), "launcher")]
 

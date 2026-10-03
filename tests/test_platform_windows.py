@@ -80,7 +80,14 @@ def test_single_electron_marker_needs_a_second_engine_signal(tmp_path):
     [result] = windows_scanner().scan([tmp_path])
 
     assert result.confidence == "medium"
-    assert result.family == "electron"
+    # LooseApp.exe names no family and one marker is generic Chromium
+    # collateral, so the honest label is the fallback.
+    assert result.family == "chromium"
+    assert {item.category for item in result.evidence} >= {
+        "electron-marker",
+        "resource",
+        "executable",
+    }
 
 
 def test_detects_browser_version_dir_layout(tmp_path):

@@ -156,11 +156,22 @@ class PlatformProfile(Protocol):
 def infer_family(evidence: list[Evidence]) -> str:
     """Infer a best-effort runtime family from evidence hints.
 
-    Engine/framework evidence is more authoritative than generic helper names:
-    Chrome, Edge, Brave, and Electron apps all have helpers, but their engine
-    names identify the actual family. Launcher executable hints outrank both:
-    on Windows every Chromium browser ships the same chrome.dll, so the exe
-    name is the only signal distinguishing them.
+    Precedence, highest first:
+
+    1. launcher executable hints (``msedge.exe``). On Windows this is what
+       separates browsers that share ``chrome.dll``.
+    2. engine hints (``Electron Framework.framework``, ``libcef.dll``, ...),
+       which outrank generic helper names.
+    3. two or more distinct Electron marker DLLs, because Electron ships no
+       named engine file on Windows. That is the same threshold
+       ``_score_confidence`` uses before it treats markers as an engine; one
+       marker is generic Chromium collateral and names nothing.
+    4. any remaining hint by majority.
+    5. ``chromium``, which is always true.
+
+    A runtime with no engine name and no recognisable launcher is reported as
+    ``chromium`` rather than guessed at: it is a Chromium core, and the
+    product around it is unknown.
     """
     for category in ("executable", "engine"):
         hints = [
@@ -171,7 +182,17 @@ def infer_family(evidence: list[Evidence]) -> str:
         if hints:
             return Counter(hints).most_common(1)[0][0]
 
-    hints = [item.family_hint for item in evidence if item.family_hint]
+    marker_names = {
+        item.path.name for item in evidence if item.category == "electron-marker"
+    }
+    if len(marker_names) >= 2:
+        return "electron"
+
+    hints = [
+        item.family_hint
+        for item in evidence
+        if item.family_hint and item.category != "electron-marker"
+    ]
     if not hints:
         return "chromium"
     return Counter(hints).most_common(1)[0][0]

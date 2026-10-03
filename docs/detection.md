@@ -105,12 +105,13 @@ C:\Apps\MyApp\icudtl.dat          → resource
 
 `infer_family()` picks one family label per runtime. Precedence, highest first:
 
-1. **executable hints** — a `.exe` name like `msedge.exe`. On Windows this is the only signal that separates browsers that share `chrome.dll`.
-2. **engine hints** — the framework/DLL that names the engine (`Electron Framework.framework` → `electron`, `Chromium Embedded Framework.framework` → `cef`, `QtWebEngineCore.framework` → `qtwebengine`, …). This outranks generic helper names, so a branded Electron app whose helper is just "Foo Helper.app" is still `electron`.
-3. **any remaining hints**, by majority.
-4. fallback **`chromium`** when no hint exists.
+1. **executable hints** — a `.exe` name like `msedge.exe`. On Windows this is the signal that separates browsers that share `chrome.dll`.
+2. **engine hints** — the framework/DLL that names the engine (`Electron Framework.framework` → `electron`, `Chromium Embedded Framework.framework` → `cef`, `msedge.dll` → `edge`, `QtWebEngineCore.framework` → `qtwebengine`, …). This outranks generic helper names, so a branded Electron app whose helper is just "Foo Helper.app" is still `electron`.
+3. **two or more distinct Electron marker DLLs** → `electron`, because Electron ships no named engine file on Windows. That is the same threshold `_score_confidence` uses before it counts markers as an engine. A single marker names nothing: `ffmpeg.dll`, `libEGL.dll`, and `libGLESv2.dll` ship with CEF, QtWebEngine, and the browsers too.
+4. **any remaining hints**, by majority.
+5. fallback **`chromium`** when nothing else applies.
 
-This is why `Google Chrome.app` reports `chrome` even though it also contains a `Google Chrome Helper.app`: the engine hint wins over the hint-less helper.
+This is why `Google Chrome.app` reports `chrome` even though it also contains a `Google Chrome Helper.app`: the engine hint wins over the hint-less helper. And a runtime whose engine filename we do not know and whose launcher is not in the table reports `chromium`: it is a Chromium core, and the product around it is unknown.
 
 The reported family is a best-effort label; a customized runtime can be misclassified without being a false positive.
 
