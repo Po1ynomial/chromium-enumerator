@@ -30,8 +30,6 @@ class FileInfo:
     is_symlink: bool
     size: int
     mode: int
-    device: int
-    inode: int
 
 
 def walk_paths(
@@ -64,7 +62,9 @@ def walk_paths(
     if not root_info.is_dir:
         return
 
-    visited: set[tuple[int, int]] = {(root_info.device, root_info.inode)}
+    visited: set[str] = set()
+    if follow_symlinks:
+        visited.add(_identity(root))
     stack: list[tuple[int, _ScandirIterator]] = []
     try:
         stack.append((0, os.scandir(root)))
@@ -95,10 +95,14 @@ def walk_paths(
             if info.is_dir:
                 if max_depth is not None and depth + 1 > max_depth:
                     continue
-                key = (info.device, info.inode)
-                if key in visited:
-                    continue
-                visited.add(key)
+                if follow_symlinks:
+                    # A plain tree cannot cycle, and symlinked directories are
+                    # already skipped when not following, so the guard only
+                    # matters when links are followed.
+                    key = _identity(info.path)
+                    if key in visited:
+                        continue
+                    visited.add(key)
                 yield info
                 try:
                     stack.append((depth + 1, os.scandir(info.path)))
@@ -137,7 +141,7 @@ def _info_for_path(path: Path, *, follow_symlinks: bool) -> FileInfo | None:
     try:
         is_symlink = path.is_symlink()
         if is_symlink and not follow_symlinks:
-            return FileInfo(path, False, False, True, 0, 0, 0, 0)
+            return FileInfo(path, False, False, True, 0, 0)
         result = path.stat() if follow_symlinks else path.lstat()
     except OSError:
         return None
@@ -152,7 +156,7 @@ def _info_for_entry(
     except OSError:
         return None
     if is_symlink and not follow_symlinks:
-        return FileInfo(Path(entry.path), False, False, True, 0, 0, 0, 0)
+        return FileInfo(Path(entry.path), False, False, True, 0, 0)
     try:
         result = entry.stat(follow_symlinks=follow_symlinks)
     except OSError:
@@ -169,6 +173,19 @@ def _info(path: Path, result: os.stat_result, *, is_symlink: bool) -> FileInfo:
         is_symlink=is_symlink,
         size=result.st_size if is_file else 0,
         mode=result.st_mode,
-        device=result.st_dev,
-        inode=result.st_ino,
     )
+
+
+def _identity(path: Path) -> str:
+    """Stable identity for symlink cycle detection.
+
+    Inodes are useless here on Windows: ``DirEntry.stat()`` fills its result
+    from the directory scan, where ``st_ino`` and ``st_dev`` are zero, so an
+    inode-keyed guard would collapse every directory into one. The resolved
+    path identifies the same directory through every link that reaches it.
+    """
+
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return str(path)

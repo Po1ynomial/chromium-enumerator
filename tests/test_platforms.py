@@ -13,8 +13,6 @@ def make_info(path: Path, *, is_dir: bool = False, mode: int = 0o644) -> FileInf
         is_symlink=False,
         size=1,
         mode=mode,
-        device=0,
-        inode=0,
     )
 
 

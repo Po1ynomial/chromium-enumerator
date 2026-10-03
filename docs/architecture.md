@@ -60,8 +60,6 @@ class FileInfo:
     is_symlink: bool
     size: int
     mode: int
-    device: int
-    inode: int
 ```
 
 ## Data flow
