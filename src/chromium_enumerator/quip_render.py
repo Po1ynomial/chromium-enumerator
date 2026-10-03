@@ -9,8 +9,6 @@ in RENDERERS and selected with --quip-style. The built-in renderers:
 Both degrade to plain text when color is disabled (non-TTY or --no-color).
 """
 
-from __future__ import annotations
-
 import math
 import os
 import sys

@@ -5,8 +5,6 @@ evidence, it only enriches results and backs ``--registry-only``. Everything
 here is a no-op off Windows.
 """
 
-from __future__ import annotations
-
 import os
 from collections.abc import Callable
 from contextlib import suppress as _suppress

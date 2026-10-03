@@ -9,8 +9,6 @@ suite) keeps the two languages in sync and checks that every template
 placeholder exists on QuipFacts.
 """
 
-from __future__ import annotations
-
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass

@@ -1,7 +1,5 @@
 """Windows PE version-resource metadata (optional ``pefile`` dependency)."""
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 
