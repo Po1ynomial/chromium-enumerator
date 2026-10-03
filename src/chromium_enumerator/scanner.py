@@ -256,37 +256,6 @@ def _cap_confidence_for_size(
     return confidence
 
 
-def _find_entrypoints(
-    root: Path,
-    *,
-    max_depth: int | None = None,
-    follow_symlinks: bool = False,
-    profile: PlatformProfile | None = None,
-) -> list[Path]:
-    """Legacy single-purpose entrypoint walk kept for external callers."""
-    return _walk_runtime_extras(
-        root,
-        profile=profile if profile is not None else current_profile(),
-        max_depth=max_depth,
-        follow_symlinks=follow_symlinks,
-    )[0]
-
-
-def _size_bytes(
-    root: Path,
-    *,
-    follow_symlinks: bool = False,
-    profile: PlatformProfile | None = None,
-) -> int:
-    """Legacy single-purpose size walk kept for external callers."""
-    return _walk_runtime_extras(
-        root,
-        profile=profile if profile is not None else current_profile(),
-        max_depth=None,
-        follow_symlinks=follow_symlinks,
-    )[1]
-
-
 def _walk_runtime_extras(
     root: Path,
     *,

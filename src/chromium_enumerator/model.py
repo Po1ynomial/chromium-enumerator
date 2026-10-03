@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 EvidenceCategory = Literal["engine", "electron-marker", "resource", "helper", "executable"]
 Confidence = Literal["high", "medium", "low"]
@@ -15,7 +15,7 @@ class Evidence:
     reason: str
     family_hint: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "category": self.category,
             "path": str(self.path),
@@ -35,7 +35,7 @@ class RuntimeResult:
     size_bytes: int = 0
     registered_as: list[dict[str, str]] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "root": str(self.root),
             "family": self.family,

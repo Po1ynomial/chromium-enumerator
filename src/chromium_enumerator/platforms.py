@@ -210,7 +210,7 @@ class MacOSProfile:
             | frozenset(MACOS_HELPER_NAMES)
         )
     )
-    seed_extra_globs = ("*.pak", "* Helper.app", "* Helper (*).app")
+    seed_extra_globs: tuple[str, ...] = ("*.pak", "* Helper.app", "* Helper (*).app")
     seed_fd_names_regex = "|".join(
         sorted(
             {
@@ -331,7 +331,7 @@ class WindowsProfile:
             }
         )
     )
-    seed_extra_globs = ("*.pak",)
+    seed_extra_globs: tuple[str, ...] = ("*.pak",)
     seed_fd_names_regex = "|".join(
         sorted({*seed_exact_names, r".*\.pak"}, key=len, reverse=True)
     )
@@ -574,7 +574,9 @@ def _collect_startmenu_internet(winreg, hive) -> list[Path]:
     return roots
 
 
-def _read_registry_values(winreg, key, wanted: frozenset[str | None]) -> dict:
+def _read_registry_values(
+    winreg, key, wanted: frozenset[str | None] | None
+) -> dict[str | None, str]:
     values: dict[str | None, str] = {}
     index = 0
     while True:
@@ -589,7 +591,7 @@ def _read_registry_values(winreg, key, wanted: frozenset[str | None]) -> dict:
     return values
 
 
-def _install_root_from_uninstall(props: dict) -> Path | None:
+def _install_root_from_uninstall(props: dict[str | None, str]) -> Path | None:
     install_location = _parse_registry_dir_path(props.get("InstallLocation"))
     if install_location is not None and install_location.is_dir():
         return install_location
@@ -652,7 +654,7 @@ def _read_pe_version_metadata(root: Path) -> dict[str, str]:
     not installed, the exe is missing, or the binary cannot be parsed.
     """
     try:
-        import pefile  # type: ignore[import-not-found]
+        import pefile  # pyright: ignore[reportMissingImports]
     except ImportError:
         return {}
 
