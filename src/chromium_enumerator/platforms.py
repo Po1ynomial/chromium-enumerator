@@ -56,6 +56,7 @@ MACOS_HELPER_NAMES = frozenset(
 WINDOWS_ENGINE_NAMES: dict[str, str] = {
     "libcef.dll": "cef",
     "chrome.dll": "chromium",
+    "msedge.dll": "edge",
     "qt5webenginecore.dll": "qtwebengine",
     "qt6webenginecore.dll": "qtwebengine",
     "nw.dll": "nwjs",

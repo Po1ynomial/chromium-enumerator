@@ -10,7 +10,7 @@ There is no single universal static signature for "Chromium core", so detection 
 
 | Category | Meaning | Examples |
 |---|---|---|
-| `engine` | A named Chromium engine artifact. The strongest signal. | `Electron Framework.framework`, `Chromium Embedded Framework.framework`, `Google Chrome Framework.framework`, `QtWebEngineCore.framework`, `libcef.dylib` (macOS); `libcef.dll`, `chrome.dll`, `Qt6WebEngineCore.dll`, `nw.dll` (Windows) |
+| `engine` | A named Chromium engine artifact. The strongest signal. | `Electron Framework.framework`, `Chromium Embedded Framework.framework`, `Google Chrome Framework.framework`, `QtWebEngineCore.framework`, `libcef.dylib` (macOS); `libcef.dll`, `chrome.dll`, `msedge.dll`, `Qt6WebEngineCore.dll`, `nw.dll` (Windows) |
 | `electron-marker` | Windows-only Electron collateral DLLs. No single identifiable Electron engine file exists on Windows, so these stand in. | `ffmpeg.dll`, `libGLESv2.dll`, `libEGL.dll` |
 | `resource` | Shared engine data files that ship inside Chromium payloads. | `icudtl.dat`, `resources.pak`, `chrome_100_percent.pak`, `v8_context_snapshot.bin`, `snapshot_blob.bin`, `devtools_resources.pak`, `qtwebengine_resources*.pak`, and any `*.pak` inside a `locales/` directory |
 | `helper` | Sub-process / crashpad artifacts characteristic of Chromium and its embedders. | `chrome_crashpad_handler`, `crashpad_handler`, `QtWebEngineProcess.app` (macOS); `crashpad_handler.exe`, `QtWebEngineProcess.exe` (Windows); macOS also treats `* Helper.app` and `* Helper (*).app` as helpers |
@@ -46,7 +46,7 @@ Executability is the POSIX execute bit on a regular file.
 
 ### Windows
 
-`WindowsProfile` matches names **case-insensitively** (all tables are lowercased at comparison time). Because Chromium browsers on Windows all ship the same `chrome.dll`, engine DLLs identify the *engine* but not the *browser*; the launcher executable name is what distinguishes Chrome, Edge, Brave, Vivaldi, and Opera. That mapping lives in `WINDOWS_FAMILY_BY_EXECUTABLE`:
+`WindowsProfile` matches names **case-insensitively** (all tables are lowercased at comparison time). Most Chromium browsers on Windows ship the same `chrome.dll`, which identifies the *engine* but not the *browser*, so the launcher executable name is what separates Chrome, Brave, Vivaldi, and Opera. Edge is the exception: it ships `msedge.dll`, an engine name that also names the family, which is what keeps WebView2 (launched by `msedgewebview2.exe`, absent from the launcher table) from falling through to a marker hint. The launcher mapping lives in `WINDOWS_FAMILY_BY_EXECUTABLE`:
 
 | Launcher | Family |
 |---|---|

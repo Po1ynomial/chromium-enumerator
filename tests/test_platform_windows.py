@@ -145,6 +145,38 @@ def test_find_seed_command_is_never_built_on_windows():
     assert command is None
 
 
+def test_msedge_dll_is_edge_engine_evidence(tmp_path):
+    runtime = tmp_path / "EdgeCore" / "151.0.4129.107"
+    make_file(runtime / "msedge.exe")
+    make_file(runtime / "msedge.dll")
+    make_file(runtime / "resources.pak")
+    make_large_payload(runtime)
+
+    [result] = windows_scanner().scan([tmp_path])
+
+    assert result.root == runtime
+    assert result.family == "edge"
+    assert result.confidence == "high"
+    assert any(item.category == "engine" for item in result.evidence)
+
+
+def test_webview2_takes_edge_family_from_msedge_dll(tmp_path):
+    runtime = tmp_path / "EdgeWebView" / "Application"
+    version = runtime / "151.0.4129.107"
+    # msedgewebview2.exe names no family, so the engine hint has to decide.
+    make_file(version / "msedgewebview2.exe")
+    make_file(version / "msedge.dll")
+    make_file(version / "ffmpeg.dll")
+    make_file(version / "resources.pak")
+    make_large_payload(runtime)
+
+    [result] = windows_scanner().scan([tmp_path])
+
+    assert result.root == runtime
+    assert result.family == "edge"
+    assert result.confidence == "high"
+
+
 def test_exhaustive_scan_skips_seed_commands(tmp_path, monkeypatch):
     import shutil
 
