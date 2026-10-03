@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Sequence
+import os
+import random
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .model import RuntimeResult
 from .platforms import PlatformProfile, current_profile, profile_for_name
+from .quip_render import RENDERERS, terminal_supports_color
+from .quips import build_facts, exit_code_for, pick_quip
 from .scanner import ChromiumScanner
 
 
@@ -13,21 +18,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.quip and args.json:
+        parser.error("--quip and --json are mutually exclusive: jokes are for humans.")
+    if args.quip_count is not None and not args.quip:
+        parser.error("--quip-count only makes sense with --quip: fake Chromium is still Chromium.")
+    if args.quip_count is not None and args.verbose:
+        parser.error("--quip-count skips scanning, so there is no listing for --verbose to show.")
+    if args.quip_count is not None and args.quip_count < 0:
+        parser.error("--quip-count must be zero or more. Negative Chromium is a different diagnosis.")
+
     profile = current_profile() if args.platform == "auto" else profile_for_name(args.platform)
-    roots = (
-        [Path(root).expanduser() for root in args.roots]
-        if args.roots
-        else default_roots(profile)
-    )
-    scanner = ChromiumScanner(
-        include_low_confidence=args.include_low_confidence,
-        max_depth=args.max_depth,
-        follow_symlinks=args.follow_symlinks,
-        exhaustive=args.exhaustive,
-        registry_only=args.registry_only,
-        profile=profile,
-    )
-    results = scanner.scan(roots)
+    if args.quip_count is not None:
+        results = fake_results(args.quip_count)
+    else:
+        roots = (
+            [Path(root).expanduser() for root in args.roots]
+            if args.roots
+            else default_roots(profile)
+        )
+        scanner = ChromiumScanner(
+            include_low_confidence=args.include_low_confidence,
+            max_depth=args.max_depth,
+            follow_symlinks=args.follow_symlinks,
+            exhaustive=args.exhaustive,
+            registry_only=args.registry_only,
+            profile=profile,
+        )
+        results = scanner.scan(roots)
 
     if args.json:
         print(
@@ -35,9 +52,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 [result.to_dict() for result in results], indent=2, sort_keys=True
             )
         )
-    else:
-        print(format_text(results, verbose=args.verbose, profile=profile))
+        return 0
 
+    if args.quip:
+        sections = []
+        if args.verbose:
+            sections.append(format_text(results, verbose=True, profile=profile))
+        sections.append(
+            format_quip(
+                results,
+                lang=resolve_lang(args.lang),
+                seed=args.quip_seed,
+                style=args.quip_style,
+                color=terminal_supports_color() and not args.no_color,
+                explicit_no_color=args.no_color,
+            )
+        )
+        print("\n\n".join(sections))
+        return exit_code_for(len(results))
+
+    print(format_text(results, verbose=args.verbose, profile=profile))
     return 0
 
 
@@ -91,6 +125,78 @@ def format_text(results, *, verbose: bool = False, profile: PlatformProfile | No
                 for item in result.evidence
             )
     return "\n".join(lines)
+
+
+def format_quip(
+    results,
+    *,
+    lang: str,
+    seed: int | None = None,
+    style: str = "auto",
+    color: bool = True,
+    explicit_no_color: bool = False,
+) -> str:
+    """Render the playful report for scan results.
+
+    With style="auto" the renderer is drawn from the same seeded RNG as the
+    copy, so a fixed --quip-seed reproduces both the joke and its presentation.
+    """
+
+    lang = lang if lang in ("zh", "en") else "en"
+    rng = random.Random(seed)
+    resolved_style = style if style in RENDERERS else rng.choice(sorted(RENDERERS))
+    renderer = RENDERERS[resolved_style]
+    facts = build_facts(results)
+    quip = pick_quip(facts, lang, rng)
+    body = renderer.render(quip, facts, color=color, lang=lang)
+    if explicit_no_color:
+        jab = "检测到 --no-color。懦夫。" if lang == "zh" else "--no-color detected. Coward."
+        return f"{jab}\n\n{body}"
+    return body
+
+
+def resolve_lang(requested: str, environ: Mapping[str, str] | None = None) -> str:
+    """Resolve --lang auto from the environment; zh* locales get Chinese copy."""
+
+    if requested in ("zh", "en"):
+        return requested
+    source: Mapping[str, str] = os.environ if environ is None else environ
+    for variable in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        value = source.get(variable, "")
+        if value:
+            return "zh" if value.lower().startswith("zh") else "en"
+    return "en"
+
+
+def fake_results(count: int) -> list[RuntimeResult]:
+    """Fabricate plausible runtimes so quip tiers can be previewed without a scan.
+
+    Sizes are deterministic (seeded by index) and mostly Electron, with CEF
+    and QtWebEngine cameos, because that is what real machines look like.
+    """
+
+    families = ["electron"] * 7 + ["cef", "electron", "qtwebengine"]
+    sizes_mb = (312, 187, 445, 96, 231, 158, 524, 203, 141, 377)
+    return [
+        RuntimeResult(
+            root=Path(f"/dev/fakeland/{name}.app"),
+            family=families[index % len(families)],
+            confidence="high",
+            size_bytes=sizes_mb[index % len(sizes_mb)] * 1024 * 1024,
+        )
+        for index, name in enumerate(_fake_names(count))
+    ]
+
+
+def _fake_names(count: int) -> list[str]:
+    base = [
+        "Slack", "Discord", "VSCode", "Spotify", "Teams", "Notion",
+        "Signal", "Figma", "Obsidian", "Postman", "Zoom", "Tidal",
+    ]
+    names = [base[index % len(base)] for index in range(count)]
+    for index in range(len(base), count):
+        names[index] = f"{names[index]}{index // len(base) + 1}"
+    return names
 
 
 def _display_name(result, profile: PlatformProfile) -> str:
@@ -170,6 +276,41 @@ def _build_parser() -> argparse.ArgumentParser:
         "--registry-only",
         action="store_true",
         help="Windows only: only report runtimes whose root matches an installed-program registry record (uninstall, App Paths, or StartMenuInternet).",
+    )
+    parser.add_argument(
+        "--quip",
+        action="store_true",
+        help="Replace the report with a playful summary of your Chromium situation. Combine with --verbose to keep the listing (quip prints last). Mutually exclusive with --json. Exit code becomes the instance count (capped at 255).",
+    )
+    parser.add_argument(
+        "--lang",
+        choices=("auto", "zh", "en"),
+        default="auto",
+        help="Quip language. Defaults to the locale, falling back to English.",
+    )
+    parser.add_argument(
+        "--quip-seed",
+        type=int,
+        default=None,
+        help="Fix the quip RNG seed for reproducible jokes.",
+    )
+    parser.add_argument(
+        "--quip-style",
+        choices=("auto", *sorted(RENDERERS)),
+        default="auto",
+        help="Quip presentation style. Defaults to a seeded random pick per run.",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI colors in quip output. NO_COLOR is also respected, silently.",
+    )
+    parser.add_argument(
+        "--quip-count",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Preview quip mode for a machine with N Chromium instances. Skips scanning entirely.",
     )
     parser.epilog = (
         "Environment overrides for Windows metadata extraction: "
