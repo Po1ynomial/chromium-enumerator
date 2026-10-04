@@ -1,18 +1,13 @@
-"""The layouts: two ways to shape a registered text for a terminal.
+"""Two terminal presentations for registered quip copy.
 
-A layout receives the interpolated values of one text model plus the runtime
-facts, and returns the finished block. Layouts own everything that is not copy:
-the frame, the severity bar, the dot parade, the unit conversions, the art.
-Anything they need beyond the baseline they must declare in ``requires``.
+Layouts own the frame, typography, severity bar and unit conversions. Copy
+requirements are declared separately from the runtime facts they display.
 """
 
 import math
 
 from .quip import Facts, layout, tier_for_count
 from .term import (
-    DOT_FACE,
-    PARADE_CAP,
-    PARADE_PER_ROW,
     colorize,
     digit_art,
     display_len,
@@ -25,6 +20,7 @@ from .term import (
 CERT_INNER = 62
 _GUTTER = "   "
 _FRAME_INNER = CERT_INNER + 2 * len(_GUTTER)
+_INDENT = "  "
 
 _BAR_WIDTH = 20
 _DOOM_BYTES = 2_500_636
@@ -32,19 +28,15 @@ _MARIO_BYTES = 40_960
 
 _TITLE = {
     "en": "CHROMIUM DIAGNOSTIC CERTIFICATE",
-    "zh": "慢 性 浏 览 器 增 生 诊 断 证 书",
+    "zh": "慢性浏览器增生诊断书",
 }
 _LABELS = {
     "en": {
-        "count": "Count:        ",
-        "diagnosis": "Diagnosis:    ",
-        "severity": "Severity:     ",
-        "disk": "Disk:         ",
-        "prognosis": "Prognosis:    ",
+        "severity": "Severity:   ",
+        "disk": "Disk:       ",
+        "prognosis": "Prognosis:  ",
     },
     "zh": {
-        "count": "数  量：",
-        "diagnosis": "诊  断：",
         "severity": "严重度：",
         "disk": "磁  盘：",
         "prognosis": "预  后：",
@@ -54,8 +46,6 @@ _SIGNATURE = {
     "en": "Dr. Electron, PhD in RAM Consumption",
     "zh": "电子博士，内存消耗学哲学博士",
 }
-_UNIT = {"en": "Chromium instances", "zh": "个 Chromium 内核"}
-_MORE = {"en": "and {n} more.", "zh": "还有 {n} 个。"}
 
 
 @layout(
@@ -63,120 +53,131 @@ _MORE = {"en": "and {n} more.", "zh": "还有 {n} 个。"}
     requires=frozenset({"diagnosis", "prognosis", "stage", "closing"}),
 )
 def certificate(values, facts):
-    """A framed medical form whose body is the model's essence."""
+    """A restrained medical form, with the count above the diagnosis."""
 
     tier = tier_for_count(facts.count)
-    lang = facts.lang
-
+    # Only the severity bar goes rainbow; the headline stays legible.
+    headline_color = "red" if tier.color == "rainbow" else tier.color
     rows = [
         _row(""),
-        _row(values["essence"]),
-        _row(""),
-        _row(f"{_label('count', lang)}{_count_line(facts)}"),
-        _row(f"{_label('diagnosis', lang)}{values['diagnosis']}"),
         _row(
-            f"{_label('severity', lang)}"
-            f"{_severity_bar(tier.severity, values['stage'], tier.color)}"
+            pad_center(
+                colorize(_count_line(facts), headline_color, bold=True), CERT_INNER
+            )
+        ),
+        _row(pad_center(values["diagnosis"], CERT_INNER)),
+        _row(""),
+        _row(colorize(values["essence"], dim=True)),
+        _row(""),
+        _field(
+            "severity",
+            _severity_bar(tier.severity, values["stage"], tier.color),
+            facts.lang,
         ),
     ]
-    disk = _disk_line(facts)
-    if disk:
-        rows.append(_row(f"{_label('disk', lang)}{disk}"))
+    if facts.size_bytes > 0:
+        rows.append(_field("disk", format_size(facts.size_bytes), facts.lang))
+        conversion = _disk_conversion(facts)
+        if conversion:
+            inset = " " * display_len(_LABELS[facts.lang]["disk"])
+            rows.append(_row(inset + colorize(conversion, dim=True)))
     rows.extend(
         (
-            _row(f"{_label('prognosis', lang)}{values['prognosis']}"),
+            _field("prognosis", values["prognosis"], facts.lang),
             _row(""),
-            _row(pad_left(_SIGNATURE[lang], CERT_INNER)),
+            _row(colorize(pad_left(_SIGNATURE[facts.lang], CERT_INNER), dim=True)),
         )
     )
-
-    lines = _parade(facts)
-    lines.extend(
+    return "\n".join(
         (
-            colorize("╔" + "═" * _FRAME_INNER + "╗", "cyan"),
-            colorize(_center(_TITLE[lang]), "cyan", bold=True),
-            colorize("╠" + "═" * _FRAME_INNER + "╣", "cyan"),
-            *(colorize(row, "cyan") for row in rows),
-            colorize("╚" + "═" * _FRAME_INNER + "╝", "cyan"),
+            _border("╔" + "═" * _FRAME_INNER + "╗"),
+            _center(colorize(_TITLE[facts.lang], bold=True)),
+            _border("╠" + "═" * _FRAME_INNER + "╣"),
+            *rows,
+            _border("╚" + "═" * _FRAME_INNER + "╝"),
             "",
-            "  " + values["closing"],
+            _INDENT + values["closing"],
         )
     )
-    return "\n".join(lines)
 
 
 @layout("bignum")
 def bignum(values, facts):
-    """The count in block digits, captioned by the model's essence."""
+    """A numeric poster with units and disk usage beside the block digits."""
 
     color = tier_for_count(facts.count).color
     art = digit_art(str(facts.count)).splitlines()
+    width = max(display_len(row) for row in art)
     label_row = len(art) // 2
-    lines = [
-        colorize(row, color)
-        + ("    " + _UNIT[facts.lang] if index == label_row else "")
-        for index, row in enumerate(art)
-    ]
-    lines.extend(("", "  " + values["essence"], "", "  " + values["closing"]))
+    unit = (
+        "个 Chromium 内核"
+        if facts.lang == "zh"
+        else ("Chromium instance" if facts.count == 1 else "Chromium instances")
+    )
+    disk = ""
+    if facts.size_bytes > 0:
+        human = format_size(facts.size_bytes)
+        disk = f"共占用 {human}" if facts.lang == "zh" else f"{human} on disk"
+    lines = []
+    for index, row in enumerate(art):
+        line = _INDENT + colorize(row, color)
+        caption = ""
+        if index == label_row:
+            caption = colorize(unit, bold=True)
+        elif index == label_row + 1 and disk:
+            caption = colorize(disk, dim=True)
+        if caption:
+            line += " " * (width - display_len(row) + 3) + caption
+        lines.append(line)
+    lines.extend(("", _INDENT + values["essence"]))
+    closing = values.get("closing")
+    if closing:
+        lines.extend(("", _INDENT + colorize(closing, dim=True)))
     return "\n".join(lines)
+
+
+def _border(text: str) -> str:
+    return colorize(text, "cyan", dim=True)
 
 
 def _row(text: str) -> str:
     inner = _GUTTER + pad_right(text, CERT_INNER) + _GUTTER
-    return f"║{inner}║"
+    return _border("║") + inner + _border("║")
 
 
 def _center(text: str) -> str:
-    return f"║{pad_center(text, _FRAME_INNER)}║"
+    return _border("║") + pad_center(text, _FRAME_INNER) + _border("║")
 
 
-def _label(field: str, lang: str) -> str:
-    return _LABELS[lang][field]
-
-
-def _parade(facts: Facts) -> list[str]:
-    """The dot parade and its remainder, or nothing when there is no count."""
-
-    shown = min(facts.count, PARADE_CAP)
-    if shown <= 0:
-        return []
-    tokens = [DOT_FACE] * shown
-    rows = [
-        "  " + " ".join(tokens[index : index + PARADE_PER_ROW])
-        for index in range(0, shown, PARADE_PER_ROW)
-    ]
-    if facts.count > shown:
-        rows.append("  ... " + _MORE[facts.lang].format(n=facts.count - shown))
-    rows.append("")
-    return rows
+def _field(field: str, value: str, lang: str) -> str:
+    return _row(colorize(_LABELS[lang][field], dim=True) + value)
 
 
 def _count_line(facts: Facts) -> str:
     if facts.lang == "zh":
         return f"{facts.count} 个 Chromium 内核"
     noun = "instance" if facts.count == 1 else "instances"
-    return f"{facts.count} {noun}"
+    return f"{facts.count} Chromium {noun}"
 
 
 def _severity_bar(severity: float, stage: str, color_name: str) -> str:
     filled = math.ceil(min(max(severity, 0.0), 1.0) * _BAR_WIDTH)
-    bar = "█" * filled + "░" * (_BAR_WIDTH - filled)
-    return colorize(f"{bar}  {stage}", color_name)
+    bar = colorize("█" * filled, color_name) + colorize(
+        "░" * (_BAR_WIDTH - filled), dim=True
+    )
+    return f"{bar}  {stage}"
 
 
-def _disk_line(facts: Facts) -> str:
-    """Layout-owned unit conversion: how many old games fit in the payload."""
+def _disk_conversion(facts: Facts) -> str:
+    """A secondary annotation, separate from the real byte total."""
 
-    if facts.size_bytes <= 0:
-        return ""
-    human = format_size(facts.size_bytes)
     unit_bytes = _MARIO_BYTES if facts.lang == "zh" else _DOOM_BYTES
     copies = facts.size_bytes // unit_bytes
     if copies <= 0:
-        return human
+        return ""
     if facts.lang == "zh":
-        return f"{human} ≈ {copies:,} 份《超级马里奥》"
-    return f"{human} ≈ {copies:,} copies of Doom (1993)"
+        return f"≈ {copies:,} 份《超级马里奥》"
+    return f"≈ {copies:,} copies of Doom (1993)"
 
 
 assert display_len(_TITLE["zh"]) <= _FRAME_INNER

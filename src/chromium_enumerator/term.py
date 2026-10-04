@@ -5,7 +5,7 @@ sequences, so padding is computed against what a terminal actually paints.
 Colour is always emitted; a caller that wants a plain stream strips it at the
 boundary with :func:`strip_ansi`.
 
-East Asian Ambiguous characters (``█``, ``║``, ``◉``) are measured as one cell.
+East Asian Ambiguous characters (``█``, ``║``) are measured as one cell.
 That is the same convention the certificate frame is drawn with.
 """
 
@@ -16,7 +16,7 @@ import unicodedata
 
 RESET = "\x1b[0m"
 BOLD = "\x1b[1m"
-BLINK = "\x1b[5m"
+DIM = "\x1b[2m"
 
 FOREGROUND: dict[str, str] = {
     "red": "\x1b[31m",
@@ -29,10 +29,6 @@ FOREGROUND: dict[str, str] = {
 RAINBOW = ("red", "yellow", "green", "cyan", "blue", "magenta")
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-DOT_FACE = "(◉)"
-PARADE_PER_ROW = 10
-PARADE_CAP = 20
 
 GLYPH_WIDTH = 9
 GLYPH_ROWS = 6
@@ -81,7 +77,9 @@ def pad_center(text: str, width: int) -> str:
     return " " * left + text + " " * (padding - left)
 
 
-def colorize(text: str, color_name: str, *, bold: bool = False) -> str:
+def colorize(
+    text: str, color_name: str = "", *, bold: bool = False, dim: bool = False
+) -> str:
     if color_name == "rainbow":
         parts: list[str] = []
         index = 0
@@ -93,15 +91,19 @@ def colorize(text: str, color_name: str, *, bold: bool = False) -> str:
                 parts.append(char)
         return BOLD + "".join(parts) + RESET
     codes = FOREGROUND.get(color_name, "")
-    if color_name == "blink":
-        codes = BLINK + FOREGROUND["red"]
+    if dim:
+        codes = DIM + codes
     if bold:
         codes = BOLD + codes
     return f"{codes}{text}{RESET}" if codes else text
 
 
 def digit_art(text: str) -> str:
-    """The digits of ``text`` as GLYPH_ROWS rows of block glyphs."""
+    """The digits of ``text`` as GLYPH_ROWS rows of block glyphs.
+
+    Long numbers are not scaled down: a wide count can outrun an 80-column
+    terminal, which is accepted rather than solved here.
+    """
 
     glyphs = [DIGIT_FONT.get(char, BLANK_GLYPH) for char in text]
     return "\n".join(

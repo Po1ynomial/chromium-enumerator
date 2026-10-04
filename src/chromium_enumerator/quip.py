@@ -57,7 +57,7 @@ TIERS: tuple[Tier, ...] = (
     Tier("starter", 5, 0.35, "yellow"),
     Tier("double_digits", 10, 0.5, "yellow"),
     Tier("collector", 25, 0.65, "red"),
-    Tier("intervention", 50, 0.8, "blink"),
+    Tier("intervention", 50, 0.8, "red"),
     Tier("datacenter", 70, 1.0, "rainbow"),
 )
 

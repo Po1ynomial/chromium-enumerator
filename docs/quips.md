@@ -53,7 +53,7 @@ A layout is one `@layout` registration that declares the capabilities it needs b
 def certificate(values, facts): ...
 ```
 
-It receives the model's already-interpolated values plus the runtime `Facts` (count, size, language) and returns the finished block. Layouts own everything that is not copy: the frame, the severity bar, the dot parade, the unit conversions, the art.
+It receives the model's already-interpolated values plus the runtime `Facts` (count, size, language) and returns the finished block. Layouts own everything that is not copy: the frame, the severity bar, the unit conversions, the art.
 
 ## Selection
 
@@ -86,17 +86,19 @@ The rules are deliberately cheap to satisfy: `{count}` in a framed string caps t
 
 ### certificate
 
-A mock-official box. Above it, the dot parade (capped at 20, with the remainder summarised). Inside, in order: the essence, the count, the diagnosis, a severity bar with the stage, an optional disk conversion, the prognosis, and a signature. Below the box, the closing line.
+A mock-official box with a dim cyan double-line frame and a neutral title. The count is bold, coloured, and centred above the diagnosis. The essence follows as a dim note, then the severity bar and stage, disk usage, prognosis, and a right-aligned signature. The closing line sits outside the box. There is no dot parade.
 
-The disk conversion is the layout's own decoration, not a fact the text model knows about: English compares the payload to Doom (1993), Chinese to Super Mario Bros cartridges. It is omitted when there is no payload.
+Disk usage and its game conversion occupy separate rows: the real byte total is foreground text, while the conversion is a dim annotation aligned below it. English compares the payload to Doom (1993), Chinese to Super Mario Bros cartridges. Both rows are omitted when there is no payload; a payload smaller than one game only shows the byte total.
 
 ### bignum
 
-The count in ANSI Shadow block digits, with the language's unit label beside the middle row, captioned by the essence and closed by the closing line. It requires nothing beyond the baseline, which is what makes it the always-compatible layout.
+The count in six-row ANSI Shadow block digits. The bold unit label sits beside the middle row, with a dim disk-usage summary directly beneath it when a payload exists. Art, essence, and closing share a two-cell left margin. The closing is dim and optional, so the layout requires only the baseline.
 
-Both fonts use East Asian Ambiguous characters (`█`, `╗`, `═`). Whether a terminal renders those one or two cells wide is a terminal setting, not something a locale reliably predicts; kitty, for instance, keeps them narrow even under `LC_ALL=zh_CN.UTF-8`. The measuring functions therefore assume the same ambiguous-is-narrow convention the frames are drawn with. Per-character rainbow colouring is unaffected by glyph width because ANSI codes are zero-width.
+The digit fonts and certificate frame use East Asian Ambiguous characters (`█`, `╗`, `═`). Whether a terminal renders those one or two cells wide is a terminal setting, not something a locale reliably predicts; kitty, for instance, keeps them narrow even under `LC_ALL=zh_CN.UTF-8`. The measuring functions therefore assume the same ambiguous-is-narrow convention the frames are drawn with. Per-character rainbow colouring is unaffected by glyph width because ANSI codes are zero-width.
 
 ## Colour
+
+Labels, annotations, signatures, and the certificate border are dim; body text keeps the terminal's default foreground. Severity uses green, yellow, or red, without blinking. At 70+ the certificate colours only its filled severity bar as a rainbow, while bignum colours only its digits that way.
 
 Layouts always emit ANSI. The CLI decides whether to keep it: `terminal_supports_color()` (a TTY, and no `NO_COLOR`) combined with `--no-color`. When colour is off, the boundary strips every escape with `term.strip_ansi`.
 
@@ -105,5 +107,5 @@ Layouts always emit ANSI. The CLI decides whether to keep it: `terminal_supports
 ## Tests
 
 - `tests/test_quip.py` — tier table, language and layout coverage, frame-width invariants, the essence appearing in every layout, exact-count overrides, seeded reproducibility, registration errors.
-- `tests/test_quip_layout.py` — frame alignment in both languages, the dot cap, digit-font integrity, colour and stripping.
+- `tests/test_quip_layout.py` — frame alignment and visual hierarchy in both languages, disk annotations, long-count rendering, digit-font integrity, colour and stripping.
 - `tests/test_quip_cli.py` — flag wiring, `--quip`/`--json` rejection, exit code, locale resolution, layout randomisation, the `--no-color` jab.

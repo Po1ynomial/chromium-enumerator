@@ -32,7 +32,7 @@ def test_quip_renders_for_empty_scan_and_exits_zero(tmp_path, capsys):
     assert exit_code == 0
     out = capsys.readouterr().out
     assert "DIAGNOSTIC CERTIFICATE" in out
-    assert "0 instances" in out
+    assert "0 Chromium instances" in out
     assert "\x1b" not in out
 
 
@@ -80,7 +80,7 @@ def test_zh_quip_output(tmp_path, capsys):
             str(tmp_path),
         ]
     )
-    assert "诊 断 证 书" in capsys.readouterr().out
+    assert "慢性浏览器增生诊断书" in capsys.readouterr().out
 
 
 def test_a_mock_scan_reaches_the_quip_and_sets_the_exit_code(capsys):
@@ -98,7 +98,7 @@ def test_a_mock_scan_reaches_the_quip_and_sets_the_exit_code(capsys):
     )
     assert exit_code == 70
     out = capsys.readouterr().out
-    assert "70 instances" in out
+    assert "70 Chromium instances" in out
     assert "Doom (1993)" in out
 
 
@@ -143,7 +143,7 @@ def test_the_reported_payload_drives_the_disk_line():
 
 
 def test_quip_survives_a_non_utf8_console():
-    # The certificate frame draws ◉, which a GBK code page cannot encode.
+    # The severity bar draws ░, which a GBK code page cannot encode.
     # Strict encoding would turn the whole report into a traceback.
     env = {key: value for key, value in os.environ.items() if key != "PYTHONUTF8"}
     env["PYTHONIOENCODING"] = "gbk"
