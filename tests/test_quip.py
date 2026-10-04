@@ -120,7 +120,7 @@ def test_every_layout_prints_the_essence_verbatim(lang):
     for count in (0, 1, 3, 30, 42, 70):
         for item in layouts():
             layout, values, facts = choose(
-                count, lang=lang, rng=random.Random(0), style=item.id
+                count, lang=lang, size_bytes=0, rng=random.Random(0), style=item.id
             )
             assert layout.id == item.id
             assert values[BASELINE] in layout.render(values, facts)
@@ -130,55 +130,50 @@ def test_explicit_style_is_honoured_for_every_tier():
     for count in (0, 1, 3, 30, 71, 999):
         for style in layout_ids():
             layout, _values, _facts = choose(
-                count, lang="en", rng=random.Random(0), style=style
+                count, lang="en", size_bytes=0, rng=random.Random(0), style=style
             )
             assert layout.id == style
 
 
 def test_unknown_style_is_rejected():
     with pytest.raises(ValueError, match="unknown quip style"):
-        choose(10, lang="en", rng=random.Random(0), style="hologram")
+        choose(10, lang="en", size_bytes=0, rng=random.Random(0), style="hologram")
 
 
 def test_unknown_language_is_rejected():
     with pytest.raises(LookupError):
-        choose(10, lang="eo", rng=random.Random(0))
+        choose(10, lang="eo", size_bytes=0, rng=random.Random(0))
 
 
 def test_special_counts_override_their_tier():
     _layout, values, _facts = choose(
-        42, lang="en", rng=random.Random(0), style="certificate"
+        42, lang="en", size_bytes=0, rng=random.Random(0), style="certificate"
     )
     assert "42 instances" in values[BASELINE]
     assert values["prognosis"] == "Mostly harmless"
 
     _layout, zh_values, _facts = choose(
-        42, lang="zh", rng=random.Random(0), style="certificate"
+        42, lang="zh", size_bytes=0, rng=random.Random(0), style="certificate"
     )
     assert "宇宙" in zh_values[BASELINE]
 
 
 def test_same_seed_reproduces_the_same_choice():
-    first = choose(30, lang="zh", rng=random.Random(7))
-    second = choose(30, lang="zh", rng=random.Random(7))
+    first = choose(30, lang="zh", size_bytes=0, rng=random.Random(7))
+    second = choose(30, lang="zh", size_bytes=0, rng=random.Random(7))
     assert first[0].id == second[0].id
     assert first[1] == second[1]
     assert first[2] == second[2]
 
 
-def test_fabricated_size_is_seeded_and_jittered():
-    same = choose(10, lang="en", rng=random.Random(3))
-    again = choose(10, lang="en", rng=random.Random(3))
-    other = choose(10, lang="en", rng=random.Random(4))
-    assert same[2].size_bytes == again[2].size_bytes
-    assert same[2].size_bytes != other[2].size_bytes
+def test_the_size_is_carried_through_untouched():
+    """Sizing is the backend's job; the quip layer never guesses."""
 
-
-def test_real_size_is_never_estimated():
     _layout, _values, facts = choose(
-        10, lang="en", rng=random.Random(0), size_bytes=1234
+        10, lang="en", size_bytes=1234, rng=random.Random(0)
     )
     assert facts.size_bytes == 1234
+    assert facts.template_values()["size_human"] == "1.2 KB"
 
 
 def test_registration_rejects_unknown_tier_and_missing_baseline():

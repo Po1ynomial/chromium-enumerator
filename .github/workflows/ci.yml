@@ -49,7 +49,7 @@ jobs:
         run: |
           set +e
           uv run chromium-count --quip --no-color --lang en \
-            --quip-style certificate --quip-count 3
+            --quip-style certificate --mock-instances 3
           code=$?
           set -e
           if [ "$code" -ne 3 ]; then

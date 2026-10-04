@@ -48,11 +48,11 @@ Replace the report with a playful summary of your Chromium situation:
 chromium-count --quip /Applications
 ```
 
-`--quip` supports localized copy (`--lang zh`), alternate presentation styles
+`--quip` supports localized copy (`--lang zh`), alternate layouts
 (`--quip-style bignum`), reproducible jokes (`--quip-seed`), and returns the
-instance count as the exit code. The style is chosen randomly per run unless
-you pin it. To preview any tier without enough Chromium on your machine, fake
-it: `chromium-count --quip --quip-count 70`.
+instance count as the exit code. The layout is chosen randomly per run unless
+you pin it. To see any output mode without owning the Chromium, fabricate a
+scan: `chromium-count --mock-instances 70`, or `CHROMIUM_COUNT_MOCK_INSTANCES=70`.
 See [docs/quips.md](docs/quips.md).
 
 Include weak evidence clusters that are normally hidden:
@@ -127,7 +127,8 @@ chromium-enumerator/
 │   ├── quip_copy.py    # the copy as data: one registration per level and language
 │   ├── quip_layout.py  # the certificate and bignum layouts
 │   ├── term.py         # terminal primitives: width, padding, ANSI colour, art
-│   └── scanner.py      # walking, grouping, scoring, metadata, sizes
+│   ├── scanner.py      # walking, grouping, scoring, metadata, sizes
+│   └── mock.py         # fabricated-scan backend for debugging output
 ├── tests/              # pytest suite with synthetic macOS and Windows layouts
 └── docs/               # detection.md, cli.md, architecture.md, quips.md
 ```

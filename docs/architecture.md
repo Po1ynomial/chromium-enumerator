@@ -12,7 +12,8 @@
 | `platforms.py` | Per-OS `PlatformProfile` implementations: evidence tables, path→root grouping, executability, metadata lookup, default roots, and seed-search vocabulary. |
 | `registry.py` | Windows installed-software records (uninstall keys, App Paths, StartMenuInternet). No-ops off Windows. |
 | `pe_metadata.py` | Windows PE `VS_VERSION_INFO` extraction via the optional `pefile` extra, plus the `CHROMIUM_COUNT_STUB_*` overrides. |
-| `scanner.py` | `ChromiumScanner`: seed discovery, single-pass walking, grouping, scoring, size accounting, registry enrichment and filtering. |
+| `scanner.py` | `ChromiumScanner`: seed discovery, single-pass walking, grouping, scoring, size accounting, registry enrichment and filtering. Also the `ResultBackend` protocol the CLI codes against. |
+| `mock.py` | `MockScanner`: a `ResultBackend` that fabricates a scan from platform-shaped fixtures, for debugging the output paths. |
 | `cli.py` | `argparse` wiring, `main()`, text and JSON formatting, locale resolution, and glue into the quip layer. |
 | `quip.py` | Registry engine: the tier table, `text_model`/`layout` registration, and the model↔layout pairing. |
 | `quip_copy.py` | The copy as data: one `text_model(...)` registration per language and level, plus the exact-count specials. |
@@ -67,7 +68,7 @@ class FileInfo:
 ## Data flow
 
 ```text
-roots ──> ChromiumScanner.scan()
+roots ──> ResultBackend.scan()            ChromiumScanner, or MockScanner
               │
               ├─ registry index (Windows; built once per scan)
               │
@@ -103,6 +104,10 @@ Invariants worth knowing:
 - **`main()` returns an int** rather than calling `sys.exit`, which is what makes CLI tests assert on exit codes.
 
 ## Extension points
+
+### Adding a result backend
+
+The CLI codes against `scanner.ResultBackend`, a one-method protocol (`scan(roots) -> list[RuntimeResult]`). `ChromiumScanner` and `mock.MockScanner` both satisfy it structurally; swapping in another requires no change outside `cli.main()`. A backend that fabricates rather than reads only has to produce results that survive the downstream formatters, which is why the mock classifies its fixtures with the real profile instead of inventing `Evidence` records.
 
 ### Adding a platform (Linux, …)
 
@@ -152,6 +157,7 @@ Tests are organized by concern rather than by module:
 | `test_platforms.py` | Profile primitives from pure paths: classification, flat-layout roots, family inference, stat reuse | Any host |
 | `test_platform_windows.py` | Windows evidence tables, root grouping, family mapping | Any host (profile injected) |
 | `test_registry.py` | Registry parsing, install-root resolution, `--registry-only` filtering and flag validation, enrichment | Any host (stub registry); one assertion is skipped on Windows itself |
+| `test_mock.py` | The fabricated-scan backend: fixture consistency with the real profiles, and the flag/environment switch | Any host |
 | `test_cli.py` | Text/JSON output shapes | POSIX (fixtures use execute bits) |
 | `test_quip.py`, `test_quip_layout.py`, `test_quip_cli.py` | Quip engine, layouts, CLI glue | Any host |
 

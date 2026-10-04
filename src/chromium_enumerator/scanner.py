@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress as _suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from .model import Confidence, Evidence, RuntimeResult
 from .platforms import PlatformProfile, current_profile, infer_family
@@ -13,6 +14,12 @@ from .registry import casefold_path
 from .walk import FileInfo, depth_from, is_link, walk_paths, within_depth
 
 _EXCEPTIONALLY_SMALL_RUNTIME_BYTES = 5 * 1024 * 1024
+
+
+class ResultBackend(Protocol):
+    """What the CLI needs from a scanner, so a fabricated one can stand in."""
+
+    def scan(self, roots: Iterable[Path | str]) -> list[RuntimeResult]: ...
 
 
 @dataclass

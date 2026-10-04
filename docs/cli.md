@@ -32,6 +32,14 @@ A missing root produces a warning on `ChromiumScanner.warnings` and is skipped; 
 | `--exhaustive` | off | Walk every path instead of the targeted seed search. Slower; use to validate the default search. |
 | `--registry-only` | off | Windows only: report only runtimes whose root matches an installed-program registry record. Requires `--platform windows`; rejected with `--exhaustive`. |
 
+### Debugging
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--mock-instances N` | unset | Fabricate a scan of `N` instances instead of reading the filesystem. Overrides `CHROMIUM_COUNT_MOCK_INSTANCES`. Feeds every output mode, not just quip mode. |
+
+Mocking replaces the backend, so it has nothing to traverse and nothing to filter. Combining it with positional roots, `--exhaustive`, `--max-depth`, `--follow-symlinks`, or `--registry-only` is an argparse error. `--platform` is honoured: it selects which fixture shape is fabricated. `--include-low-confidence` is harmless, since the fabricated results are all `high`.
+
 ### Output
 
 | Flag | Default | Effect |
@@ -47,19 +55,19 @@ See [quips.md](quips.md) for the full design. Summary of the flags:
 |---|---|---|
 | `--quip` | off | Replace the report with a playful summary. Mutually exclusive with `--json`. Exit code becomes the instance count, capped at 255. |
 | `--lang {auto,zh,en}` | `auto` | Quip language. `auto` reads `LC_ALL`, `LC_MESSAGES`, `LANG`; `zh*` gets Chinese, otherwise English. |
-| `--quip-seed N` | random | Fix the RNG seed, reproducing the layout pick and the estimated payload size. |
+| `--quip-seed N` | random | Fix the RNG seed, reproducing the layout pick. |
 | `--quip-style {auto,certificate,bignum}` | `auto` | Layout. `auto` picks one at random from the layouts the chosen text model can serve. |
 | `--no-color` | off | Disable ANSI colors and print a jab. `NO_COLOR` and non-TTY output degrade silently instead. |
-| `--quip-count N` | unset | Skip scanning entirely and render the quip for `N` instances; the payload size is estimated. Requires `--quip`; rejected with `--verbose`; must be non-negative. |
 
-Argument-combination errors are reported by argparse with exit status 2, using these exact messages:
+### Argument combinations
+
+Argparse reports every rejected combination with exit status 2 and these exact messages:
 
 - `--quip` with `--json` — `--quip and --json are mutually exclusive: jokes are for humans.`
-- `--quip-count` without `--quip` — `--quip-count only makes sense with --quip: fake Chromium is still Chromium.`
-- `--quip-count` with `--verbose` — `--quip-count skips scanning, so there is no listing for --verbose to show.`
-- negative `--quip-count` — `--quip-count must be zero or more. Negative Chromium is a different diagnosis.`
 - `--registry-only` with `--exhaustive` — `--registry-only cannot be combined with --exhaustive: an exhaustive scan builds no seed list to filter.`
 - `--registry-only` without the Windows profile — `--registry-only needs a Windows registry: pass --platform windows.`
+- mocking with a scan-shaping flag — `<source> fabricates the scan, so <flag> cannot be combined with it.`, where `<source>` is `--mock-instances` or `CHROMIUM_COUNT_MOCK_INSTANCES` and `<flag>` is positional roots, `--exhaustive`, `--max-depth`, `--follow-symlinks`, or `--registry-only`
+- a mock count that is not a non-negative integer — `<source> must be a non-negative integer, got '<value>'.`, or `<source> must be zero or more. Negative Chromium is a different diagnosis.` for a negative one
 
 ## Text output
 
@@ -131,6 +139,7 @@ Notes:
 |---|---|
 | `NO_COLOR` | Any value disables ANSI colors in quip mode, silently. |
 | `LC_ALL`, `LC_MESSAGES`, `LANG` | Read by `--lang auto` to pick Chinese or English copy; first non-empty wins. |
+| `CHROMIUM_COUNT_MOCK_INSTANCES` | Fabricate a scan of that many instances instead of reading the filesystem. A non-negative integer; `--mock-instances` outranks it. Beats every normal scan, so it is easy to leave behind in a shell. |
 | `CHROMIUM_COUNT_STUB_FILEDESCRIPTION` | Windows: stub `FileDescription` metadata (overrides extracted value). |
 | `CHROMIUM_COUNT_STUB_PRODUCTNAME` | Windows: stub `ProductName` metadata. |
 | `CHROMIUM_COUNT_STUB_FILEVERSION` | Windows: stub `FileVersion` metadata. |
@@ -167,8 +176,12 @@ chromium-count --platform windows --registry-only
 # the playful report, pinned so it is reproducible
 chromium-count --quip --lang zh --quip-seed 7 /Applications
 
-# preview a tier without owning that many runtimes
-chromium-count --quip --quip-count 70
+# see any output mode without owning the Chromium
+chromium-count --mock-instances 70 --verbose
+CHROMIUM_COUNT_MOCK_INSTANCES=70 chromium-count --quip
+
+# a fabricated Windows shape from any host
+chromium-count --mock-instances 5 --platform windows --json
 ```
 
 ## Library use
@@ -186,6 +199,15 @@ for result in results:
     print(result.root, result.family, result.confidence)
 
 print(scanner.warnings)  # missing roots, traversal errors, tool failures
+```
+
+`MockScanner` satisfies the same `ResultBackend` protocol, so a caller that only needs the downstream shapes can swap it in:
+
+```python
+from chromium_enumerator.mock import MockScanner
+from chromium_enumerator.platforms import MacOSProfile
+
+results = MockScanner(12, profile=MacOSProfile()).scan(())
 ```
 
 See [architecture.md](architecture.md) for the data model.

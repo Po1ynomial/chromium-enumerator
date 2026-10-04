@@ -5,13 +5,24 @@ import random
 import sys
 from collections.abc import Mapping, Sequence
 from contextlib import suppress as _suppress
+from dataclasses import dataclass
 from pathlib import Path
 
+from .mock import ENV_VAR as MOCK_ENV_VAR
+from .mock import MockScanner
 from .model import RuntimeResult
 from .platforms import PlatformProfile, current_profile, profile_for_name
 from .quip import choose, exit_code_for, layout_ids
-from .scanner import ChromiumScanner
+from .scanner import ChromiumScanner, ResultBackend
 from .term import format_size, strip_ansi, terminal_supports_color
+
+
+@dataclass(frozen=True, slots=True)
+class _MockRequest:
+    """A request to fabricate the scan, and where the count came from."""
+
+    count: int
+    source: str
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -21,18 +32,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.quip and args.json:
         parser.error("--quip and --json are mutually exclusive: jokes are for humans.")
-    if args.quip_count is not None and not args.quip:
-        parser.error(
-            "--quip-count only makes sense with --quip: fake Chromium is still Chromium."
-        )
-    if args.quip_count is not None and args.verbose:
-        parser.error(
-            "--quip-count skips scanning, so there is no listing for --verbose to show."
-        )
-    if args.quip_count is not None and args.quip_count < 0:
-        parser.error(
-            "--quip-count must be zero or more. Negative Chromium is a different diagnosis."
-        )
 
     profile = (
         current_profile()
@@ -49,17 +48,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--registry-only needs a Windows registry: pass --platform windows."
         )
 
-    if args.quip_count is not None:
-        results: list[RuntimeResult] = []
-        instance_count = args.quip_count
-        instance_bytes: int | None = None
+    mock = _mock_request(parser, args, os.environ)
+    if mock is not None:
+        _reject_mock_conflicts(parser, args, mock.source)
+        backend: ResultBackend = MockScanner(mock.count, profile=profile)
+        results = backend.scan(())
     else:
         roots = (
             [Path(root).expanduser() for root in args.roots]
             if args.roots
             else default_roots(profile)
         )
-        scanner = ChromiumScanner(
+        backend = ChromiumScanner(
             include_low_confidence=args.include_low_confidence,
             max_depth=args.max_depth,
             follow_symlinks=args.follow_symlinks,
@@ -67,9 +67,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             registry_only=args.registry_only,
             profile=profile,
         )
-        results = scanner.scan(roots)
-        instance_count = len(results)
-        instance_bytes = sum(result.size_bytes for result in results)
+        results = backend.scan(roots)
+
+    instance_count = len(results)
+    instance_bytes = sum(result.size_bytes for result in results)
 
     if args.json:
         print(
@@ -120,6 +121,50 @@ def _configure_stdout() -> None:
 def default_roots(profile: PlatformProfile | None = None) -> list[Path]:
     active = profile if profile is not None else current_profile()
     return active.default_roots()
+
+
+def _mock_request(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    environ: Mapping[str, str],
+) -> _MockRequest | None:
+    """Resolve the mock count, with the flag outranking the environment."""
+
+    if args.mock_instances is not None:
+        count, source = args.mock_instances, "--mock-instances"
+    else:
+        raw = environ.get(MOCK_ENV_VAR)
+        if raw is None:
+            return None
+        source = MOCK_ENV_VAR
+        try:
+            count = int(raw)
+        except ValueError:
+            parser.error(f"{MOCK_ENV_VAR} must be a non-negative integer, got {raw!r}.")
+    if count < 0:
+        parser.error(
+            f"{source} must be zero or more. Negative Chromium is a different diagnosis."
+        )
+    return _MockRequest(count, source)
+
+
+def _reject_mock_conflicts(
+    parser: argparse.ArgumentParser, args: argparse.Namespace, source: str
+) -> None:
+    """A fabricated scan has nothing to traverse and nothing to filter."""
+
+    conflicts = (
+        (bool(args.roots), "positional roots"),
+        (args.exhaustive, "--exhaustive"),
+        (args.max_depth is not None, "--max-depth"),
+        (args.follow_symlinks, "--follow-symlinks"),
+        (args.registry_only, "--registry-only"),
+    )
+    for present, flag in conflicts:
+        if present:
+            parser.error(
+                f"{source} fabricates the scan, so {flag} cannot be combined with it."
+            )
 
 
 def format_text(
@@ -178,7 +223,7 @@ def format_quip(
     count: int,
     *,
     lang: str,
-    size_bytes: int | None = None,
+    size_bytes: int,
     seed: int | None = None,
     style: str = "auto",
     color: bool = True,
@@ -186,8 +231,8 @@ def format_quip(
 ) -> str:
     """Render the playful report for a count of Chromium runtimes.
 
-    The layout pick and the fabricated-size jitter both draw from the same
-    seeded RNG, so a fixed --quip-seed reproduces the whole output.
+    The layout pick draws from the seeded RNG, so a fixed --quip-seed
+    reproduces the whole output.
     """
 
     rng = random.Random(seed)
@@ -319,15 +364,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable ANSI colors in quip output. NO_COLOR is also respected, silently.",
     )
     parser.add_argument(
-        "--quip-count",
+        "--mock-instances",
         type=int,
         default=None,
         metavar="N",
-        help="Preview quip mode for a machine with N Chromium instances. Skips scanning entirely; the payload size is estimated.",
+        help="Fabricate a scan of N instances instead of reading the filesystem, for debugging output. Overrides CHROMIUM_COUNT_MOCK_INSTANCES.",
     )
     parser.epilog = (
-        "Environment overrides for Windows metadata extraction: "
-        "CHROMIUM_COUNT_STUB_FILEDESCRIPTION, CHROMIUM_COUNT_STUB_PRODUCTNAME, "
-        "CHROMIUM_COUNT_STUB_FILEVERSION."
+        "Environment: CHROMIUM_COUNT_MOCK_INSTANCES fabricates a scan of that many "
+        "instances; CHROMIUM_COUNT_STUB_FILEDESCRIPTION, CHROMIUM_COUNT_STUB_PRODUCTNAME "
+        "and CHROMIUM_COUNT_STUB_FILEVERSION override Windows metadata extraction."
     )
     return parser

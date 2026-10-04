@@ -7,6 +7,8 @@ import pytest
 from chromium_enumerator.cli import format_quip, main, resolve_lang
 from tests.helpers import make_results
 
+SIZE_BYTES = 200 * 1024 * 1024
+
 
 def test_quip_and_json_are_mutually_exclusive(capsys):
     with pytest.raises(SystemExit) as error:
@@ -81,14 +83,14 @@ def test_zh_quip_output(tmp_path, capsys):
     assert "诊 断 证 书" in capsys.readouterr().out
 
 
-def test_quip_count_skips_scan_and_renders_tier(capsys):
+def test_a_mock_scan_reaches_the_quip_and_sets_the_exit_code(capsys):
     exit_code = main(
         [
             "--quip",
             "--no-color",
             "--lang",
             "en",
-            "--quip-count",
+            "--mock-instances",
             "70",
             "--quip-style",
             "certificate",
@@ -101,52 +103,43 @@ def test_quip_count_skips_scan_and_renders_tier(capsys):
 
 
 def test_auto_style_is_deterministic_for_a_seed():
-    first = format_quip(10, lang="en", seed=3, style="auto", color=False)
-    second = format_quip(10, lang="en", seed=3, style="auto", color=False)
+    first = format_quip(
+        10, lang="en", size_bytes=SIZE_BYTES, seed=3, style="auto", color=False
+    )
+    second = format_quip(
+        10, lang="en", size_bytes=SIZE_BYTES, seed=3, style="auto", color=False
+    )
     assert first == second
 
 
 def test_auto_style_reaches_both_layouts():
     seen = set()
     for seed in range(30):
-        out = format_quip(10, lang="en", seed=seed, style="auto", color=False)
+        out = format_quip(
+            10, lang="en", size_bytes=SIZE_BYTES, seed=seed, style="auto", color=False
+        )
         seen.add("certificate" if "CERTIFICATE" in out else "bignum")
     assert seen == {"bignum", "certificate"}
 
 
 def test_explicit_style_wins_over_auto():
-    out = format_quip(10, lang="en", seed=0, style="bignum", color=False)
+    out = format_quip(
+        10, lang="en", size_bytes=SIZE_BYTES, seed=0, style="bignum", color=False
+    )
     assert "CERTIFICATE" not in out
     assert "Chromium instances" in out
 
-    out = format_quip(10, lang="en", seed=0, style="certificate", color=False)
+    out = format_quip(
+        10, lang="en", size_bytes=SIZE_BYTES, seed=0, style="certificate", color=False
+    )
     assert "CERTIFICATE" in out
 
 
-def test_fabricated_size_varies_between_runs_but_tracks_the_seed():
-    pinned = {
-        format_quip(10, lang="en", seed=5, size_bytes=None, color=False)
-        for _ in range(5)
-    }
-    assert len(pinned) == 1
-    unpinned = {format_quip(10, lang="en", color=False) for _ in range(40)}
-    assert len(unpinned) > 1
-
-
-def test_quip_count_requires_quip_flag(capsys):
-    with pytest.raises(SystemExit) as error:
-        main(["--quip-count", "70"])
-    assert error.value.code == 2
-    assert "fake Chromium is still Chromium" in capsys.readouterr().err
-
-
-def test_quip_count_rejects_verbose_and_negative(capsys):
-    with pytest.raises(SystemExit):
-        main(["--quip", "--verbose", "--quip-count", "5"])
-    assert "no listing" in capsys.readouterr().err
-    with pytest.raises(SystemExit):
-        main(["--quip", "--quip-count", "-1"])
-    assert "zero or more" in capsys.readouterr().err
+def test_the_reported_payload_drives_the_disk_line():
+    out = format_quip(
+        1, lang="en", size_bytes=0, seed=0, style="certificate", color=False
+    )
+    assert "Disk:" not in out
 
 
 def test_quip_survives_a_non_utf8_console():
@@ -157,7 +150,7 @@ def test_quip_survives_a_non_utf8_console():
     script = (
         "import sys; from chromium_enumerator.cli import main; "
         "sys.exit(main(['--quip', '--no-color', '--lang', 'en', "
-        "'--quip-style', 'certificate', '--quip-count', '5']))"
+        "'--quip-style', 'certificate', '--mock-instances', '5']))"
     )
 
     completed = subprocess.run(
@@ -180,14 +173,14 @@ def test_stdout_without_reconfigure_is_tolerated(monkeypatch):
     _configure_stdout()  # must not raise
 
 
-def test_quip_count_zero_renders_zero_tier(capsys):
+def test_mock_zero_renders_the_zero_tier(capsys):
     exit_code = main(
         [
             "--quip",
             "--no-color",
             "--lang",
             "zh",
-            "--quip-count",
+            "--mock-instances",
             "0",
             "--quip-style",
             "certificate",

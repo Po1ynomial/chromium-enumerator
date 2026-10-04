@@ -18,12 +18,6 @@ from dataclasses import dataclass
 
 from .term import format_size
 
-BYTES_PER_RUNTIME = 256 * 1024 * 1024
-"""Plausible average payload, used only when the real size is unknown."""
-
-_SIZE_JITTER = (0.85, 1.15)
-"""How much to fuzz a fabricated size, so repeated previews differ."""
-
 _MAX_EXIT_CODE = 255
 
 BASELINE = "essence"
@@ -158,8 +152,8 @@ def choose(
     count: int,
     *,
     lang: str,
+    size_bytes: int,
     rng: random.Random,
-    size_bytes: int | None = None,
     style: str | None = None,
 ) -> tuple[Layout, dict[str, str], Facts]:
     """Pick a text model for the count, then a layout that model can serve.
@@ -168,7 +162,7 @@ def choose(
     ones). Returned values are the model's templates already interpolated.
     """
 
-    facts = Facts(count, _size_or_estimate(count, size_bytes, rng), lang)
+    facts = Facts(count, size_bytes, lang)
     forced = None if style is None else _layout(style)
 
     model = rng.choice(_candidates(lang, count, forced))
@@ -218,12 +212,6 @@ def _resolve(model: TextModel, facts: Facts) -> dict[str, str]:
 
 def _interpolate(template: str, facts: Facts) -> str:
     return template.format(**facts.template_values())
-
-
-def _size_or_estimate(count: int, size_bytes: int | None, rng: random.Random) -> int:
-    if size_bytes is not None:
-        return size_bytes
-    return int(count * BYTES_PER_RUNTIME * rng.uniform(*_SIZE_JITTER))
 
 
 def _load_builtins() -> None:

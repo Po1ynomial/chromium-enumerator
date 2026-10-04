@@ -8,6 +8,8 @@
 - `--quip` and `--json` are mutually exclusive; argparse rejects the combination.
 - The exit code becomes the instance count, capped at 255 (`echo $?` for the post-scan aftershock).
 
+To see any tier without owning the Chromium, fabricate the scan: `--mock-instances N` or `CHROMIUM_COUNT_MOCK_INSTANCES=N`. The mock backend is not part of this layer; it is a general debug switch that happens to feed the quip like a real scan. See [cli.md](cli.md#debugging).
+
 ## Layers
 
 ```text
