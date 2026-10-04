@@ -34,7 +34,7 @@ def test_quip_renders_for_empty_scan_and_exits_zero(tmp_path, capsys):
     assert "\x1b" not in out
 
 
-def test_quip_exit_code_matches_count(tmp_path, capsys, monkeypatch):
+def test_quip_exit_code_matches_a_real_scan_count(tmp_path, capsys, monkeypatch):
     from chromium_enumerator import cli
 
     class FakeScanner:
@@ -49,8 +49,7 @@ def test_quip_exit_code_matches_count(tmp_path, capsys, monkeypatch):
         ["--quip", "--no-color", "--lang", "en", "--quip-seed", "0", str(tmp_path)]
     )
     assert exit_code == 42
-    out = capsys.readouterr().out
-    assert "universe" in out
+    assert "Electron" in capsys.readouterr().out
 
 
 def test_explicit_no_color_adds_jab(tmp_path, capsys):
@@ -79,11 +78,10 @@ def test_zh_quip_output(tmp_path, capsys):
             str(tmp_path),
         ]
     )
-    out = capsys.readouterr().out
-    assert "诊 断 证 书" in out
+    assert "诊 断 证 书" in capsys.readouterr().out
 
 
-def test_quip_count_skips_scan_and_renders_tier(tmp_path, capsys):
+def test_quip_count_skips_scan_and_renders_tier(capsys):
     exit_code = main(
         [
             "--quip",
@@ -94,7 +92,6 @@ def test_quip_count_skips_scan_and_renders_tier(tmp_path, capsys):
             "70",
             "--quip-style",
             "certificate",
-            str(tmp_path),
         ]
     )
     assert exit_code == 70
@@ -104,30 +101,36 @@ def test_quip_count_skips_scan_and_renders_tier(tmp_path, capsys):
 
 
 def test_auto_style_is_deterministic_for_a_seed():
-    results = make_results(10)
-    first = format_quip(results, lang="en", seed=3, style="auto", color=False)
-    second = format_quip(results, lang="en", seed=3, style="auto", color=False)
+    first = format_quip(10, lang="en", seed=3, style="auto", color=False)
+    second = format_quip(10, lang="en", seed=3, style="auto", color=False)
     assert first == second
 
 
-def test_auto_style_reaches_both_renderers():
-    results = make_results(10)
+def test_auto_style_reaches_both_layouts():
     seen = set()
     for seed in range(30):
-        out = format_quip(results, lang="en", seed=seed, style="auto", color=False)
+        out = format_quip(10, lang="en", seed=seed, style="auto", color=False)
         seen.add("certificate" if "CERTIFICATE" in out else "bignum")
     assert seen == {"bignum", "certificate"}
 
 
 def test_explicit_style_wins_over_auto():
-    out = format_quip(make_results(10), lang="en", seed=0, style="bignum", color=False)
+    out = format_quip(10, lang="en", seed=0, style="bignum", color=False)
     assert "CERTIFICATE" not in out
     assert "Chromium instances" in out
 
-    out = format_quip(
-        make_results(10), lang="en", seed=0, style="certificate", color=False
-    )
+    out = format_quip(10, lang="en", seed=0, style="certificate", color=False)
     assert "CERTIFICATE" in out
+
+
+def test_fabricated_size_varies_between_runs_but_tracks_the_seed():
+    pinned = {
+        format_quip(10, lang="en", seed=5, size_bytes=None, color=False)
+        for _ in range(5)
+    }
+    assert len(pinned) == 1
+    unpinned = {format_quip(10, lang="en", color=False) for _ in range(40)}
+    assert len(unpinned) > 1
 
 
 def test_quip_count_requires_quip_flag(capsys):
@@ -147,7 +150,7 @@ def test_quip_count_rejects_verbose_and_negative(capsys):
 
 
 def test_quip_survives_a_non_utf8_console():
-    # The certificate renderer draws ◉, which a GBK code page cannot encode.
+    # The certificate frame draws ◉, which a GBK code page cannot encode.
     # Strict encoding would turn the whole report into a traceback.
     env = {key: value for key, value in os.environ.items() if key != "PYTHONUTF8"}
     env["PYTHONIOENCODING"] = "gbk"

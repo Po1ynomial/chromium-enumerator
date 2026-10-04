@@ -9,9 +9,9 @@ from pathlib import Path
 
 from .model import RuntimeResult
 from .platforms import PlatformProfile, current_profile, profile_for_name
-from .quip_render import RENDERERS, terminal_supports_color
-from .quips import build_facts, exit_code_for, pick_quip
+from .quip import choose, exit_code_for, layout_ids
 from .scanner import ChromiumScanner
+from .term import format_size, strip_ansi, terminal_supports_color
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -50,7 +50,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     if args.quip_count is not None:
-        results = fake_results(args.quip_count)
+        results: list[RuntimeResult] = []
+        instance_count = args.quip_count
+        instance_bytes: int | None = None
     else:
         roots = (
             [Path(root).expanduser() for root in args.roots]
@@ -66,6 +68,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile=profile,
         )
         results = scanner.scan(roots)
+        instance_count = len(results)
+        instance_bytes = sum(result.size_bytes for result in results)
 
     if args.json:
         print(
@@ -81,8 +85,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             sections.append(format_text(results, verbose=True, profile=profile))
         sections.append(
             format_quip(
-                results,
+                instance_count,
                 lang=resolve_lang(args.lang),
+                size_bytes=instance_bytes,
                 seed=args.quip_seed,
                 style=args.quip_style,
                 color=terminal_supports_color() and not args.no_color,
@@ -90,7 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         print("\n\n".join(sections))
-        return exit_code_for(len(results))
+        return exit_code_for(instance_count)
 
     print(format_text(results, verbose=args.verbose, profile=profile))
     return 0
@@ -143,7 +148,7 @@ def format_text(
         display_name = _display_name(result, active)
         summary = f"{display_name} — {_title_family(result.family)}, {result.confidence} confidence"
         if result.size_bytes:
-            summary = f"{summary}, {_format_size(result.size_bytes)}"
+            summary = f"{summary}, {format_size(result.size_bytes)}"
         lines.append(f"  {index}. {summary}")
         lines.append(f"     {result.root}")
 
@@ -170,27 +175,32 @@ def format_text(
 
 
 def format_quip(
-    results: Sequence[RuntimeResult],
+    count: int,
     *,
     lang: str,
+    size_bytes: int | None = None,
     seed: int | None = None,
     style: str = "auto",
     color: bool = True,
     explicit_no_color: bool = False,
 ) -> str:
-    """Render the playful report for scan results.
+    """Render the playful report for a count of Chromium runtimes.
 
-    With style="auto" the renderer is drawn from the same seeded RNG as the
-    copy, so a fixed --quip-seed reproduces both the joke and its presentation.
+    The layout pick and the fabricated-size jitter both draw from the same
+    seeded RNG, so a fixed --quip-seed reproduces the whole output.
     """
 
-    lang = lang if lang in ("zh", "en") else "en"
     rng = random.Random(seed)
-    resolved_style = style if style in RENDERERS else rng.choice(sorted(RENDERERS))
-    renderer = RENDERERS[resolved_style]
-    facts = build_facts(results)
-    quip = pick_quip(facts, lang, rng)
-    body = renderer.render(quip, facts, color=color, lang=lang)
+    chosen, values, facts = choose(
+        count,
+        lang=lang,
+        rng=rng,
+        size_bytes=size_bytes,
+        style=None if style == "auto" else style,
+    )
+    body = chosen.render(values, facts)
+    if not color:
+        body = strip_ansi(body)
     if explicit_no_color:
         jab = (
             "检测到 --no-color。懦夫。"
@@ -214,47 +224,6 @@ def resolve_lang(requested: str, environ: Mapping[str, str] | None = None) -> st
     return "en"
 
 
-def fake_results(count: int) -> list[RuntimeResult]:
-    """Fabricate plausible runtimes so quip tiers can be previewed without a scan.
-
-    Sizes are deterministic (seeded by index) and mostly Electron, with CEF
-    and QtWebEngine cameos, because that is what real machines look like.
-    """
-
-    families = ["electron"] * 7 + ["cef", "electron", "qtwebengine"]
-    sizes_mb = (312, 187, 445, 96, 231, 158, 524, 203, 141, 377)
-    return [
-        RuntimeResult(
-            root=Path(f"/dev/fakeland/{name}.app"),
-            family=families[index % len(families)],
-            confidence="high",
-            size_bytes=sizes_mb[index % len(sizes_mb)] * 1024 * 1024,
-        )
-        for index, name in enumerate(_fake_names(count))
-    ]
-
-
-def _fake_names(count: int) -> list[str]:
-    base = [
-        "Slack",
-        "Discord",
-        "VSCode",
-        "Spotify",
-        "Teams",
-        "Notion",
-        "Signal",
-        "Figma",
-        "Obsidian",
-        "Postman",
-        "Zoom",
-        "Tidal",
-    ]
-    names = [base[index % len(base)] for index in range(count)]
-    for index in range(len(base), count):
-        names[index] = f"{names[index]}{index // len(base) + 1}"
-    return names
-
-
 def _display_name(result: RuntimeResult, profile: PlatformProfile) -> str:
     if result.registered_as:
         name = result.registered_as[0].get("DisplayName")
@@ -267,18 +236,6 @@ def _title_family(family: str) -> str:
     if family == "qtwebengine":
         return "QtWebEngine"
     return family.capitalize()
-
-
-def _format_size(size_bytes: int) -> str:
-    units = ("B", "KB", "MB", "GB", "TB")
-    size = float(size_bytes)
-    for unit in units:
-        if size < 1024 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(size)} {unit}"
-            return f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size_bytes} B"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -352,7 +309,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--quip-style",
-        choices=("auto", *sorted(RENDERERS)),
+        choices=("auto", *layout_ids()),
         default="auto",
         help="Quip presentation style. Defaults to a seeded random pick per run.",
     )
@@ -366,7 +323,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="N",
-        help="Preview quip mode for a machine with N Chromium instances. Skips scanning entirely.",
+        help="Preview quip mode for a machine with N Chromium instances. Skips scanning entirely; the payload size is estimated.",
     )
     parser.epilog = (
         "Environment overrides for Windows metadata extraction: "

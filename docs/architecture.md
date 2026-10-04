@@ -14,8 +14,10 @@
 | `pe_metadata.py` | Windows PE `VS_VERSION_INFO` extraction via the optional `pefile` extra, plus the `CHROMIUM_COUNT_STUB_*` overrides. |
 | `scanner.py` | `ChromiumScanner`: seed discovery, single-pass walking, grouping, scoring, size accounting, registry enrichment and filtering. |
 | `cli.py` | `argparse` wiring, `main()`, text and JSON formatting, locale resolution, and glue into the quip layer. |
-| `quips.py` | Quip facts, tone tiers, localized copy pools, RNG selection, copy validation. Data plus pure functions. |
-| `quip_render.py` | Pluggable quip renderers (`QuipRenderer` protocol, `CertificateRenderer`, `BigNumberRenderer`). |
+| `quip.py` | Registry engine: the tier table, `text_model`/`layout` registration, and the model↔layout pairing. |
+| `quip_copy.py` | The copy as data: one `text_model(...)` registration per language and level, plus the exact-count specials. |
+| `quip_layout.py` | The `certificate` and `bignum` layouts: frames, art, decorations, unit conversions. |
+| `term.py` | Terminal primitives shared by the layouts and the text report: display width, padding, ANSI colour, digit font. |
 
 ## Data model
 
@@ -127,9 +129,18 @@ If a new *category* is needed (not just a new name), extend `EvidenceCategory` i
 
 Text and JSON are produced by `format_text()` and `json.dumps` in `cli.py`. A new format is a branch in `main()`; the data it needs is entirely in the `RuntimeResult` list.
 
-### Adding quip styles or copy
+### Adding quip copy or a layout
 
-See [quips.md](quips.md). Renderers implement `QuipRenderer` and register in `RENDERERS`; copy lives in `quips.py` data structures guarded by `validate_copy()`.
+See [quips.md](quips.md). A capability is a keyword on one `text_model(...)`
+registration; a layout is one `@layout` decorator with its `requires`. Neither
+touches the other, and neither needs a schema change — that is the point of the
+registry.
+
+```text
+text_model(...)  in quip_copy.py     register copy + capabilities
+@layout(...)     in quip_layout.py   register a renderer + its requirements
+quip.choose()                        count → tier → model → compatible layout
+```
 
 ## Testing
 
@@ -142,7 +153,7 @@ Tests are organized by concern rather than by module:
 | `test_platform_windows.py` | Windows evidence tables, root grouping, family mapping | Any host (profile injected) |
 | `test_registry.py` | Registry parsing, install-root resolution, `--registry-only` filtering and flag validation, enrichment | Any host (stub registry); one assertion is skipped on Windows itself |
 | `test_cli.py` | Text/JSON output shapes | POSIX (fixtures use execute bits) |
-| `test_quips.py`, `test_quip_render.py`, `test_quip_cli.py` | Quip layers | Any host |
+| `test_quip.py`, `test_quip_layout.py`, `test_quip_cli.py` | Quip engine, layouts, CLI glue | Any host |
 
 Synthetic layouts are built in `tmp_path`; nothing touches the real machine. Windows suites work everywhere because `WindowsProfile` is passed explicitly instead of relying on `os.name`.
 

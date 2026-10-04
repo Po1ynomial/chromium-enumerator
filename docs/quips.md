@@ -1,91 +1,107 @@
 # Quip Mode
 
-`--quip` replaces the plain report with a playful, dramatized summary of the scan results. It never changes what is scanned or detected — it is a pure presentation layer on top of the same `RuntimeResult` list.
+`--quip` replaces the plain report with a playful summary of the scan. It never changes what is scanned or detected: the engine is handed a count, a byte total, a language, and an RNG, and it returns text.
 
-```sh
-chromium-count --quip /Applications
-```
+## Behaviour contract
 
-Behavior contract:
-
-- `--quip` alone prints only the quip. Add `--verbose` to also get the normal listing; the quip always prints **last** (the punchline lands at the end).
-- `--quip` and `--json` are mutually exclusive; argparse rejects the combination. JSON is for scripts, jokes are for humans.
+- `--quip` alone prints only the quip. Add `--verbose` to also get the normal listing; the quip always prints **last**.
+- `--quip` and `--json` are mutually exclusive; argparse rejects the combination.
 - The exit code becomes the instance count, capped at 255 (`echo $?` for the post-scan aftershock).
 
-## Flags
-
-| Flag | Effect |
-|---|---|
-| `--quip` | Enable quip mode |
-| `--lang auto\|zh\|en` | Quip language. `auto` reads `LC_ALL`/`LC_MESSAGES`/`LANG`; `zh*` locales get Chinese copy, everything else English |
-| `--quip-seed N` | Fix the RNG seed for a reproducible joke |
-| `--quip-style auto\|certificate\|bignum` | Presentation style. `auto` (default) picks a renderer from the seeded RNG, so a fixed `--quip-seed` reproduces both the joke and its presentation |
-| `--no-color` | Disable ANSI colors, with an audible-wink jab. Passive `NO_COLOR`/non-TTY detection degrades silently |
-| `--quip-count N` | Skip scanning and preview quip mode for a machine with N instances (fabricated runtimes with plausible sizes and families). Requires `--quip`; incompatible with `--verbose` |
-
-## Architecture
+## Layers
 
 ```text
-scanner.py ──> RuntimeResult list
-                    │
-quips.py      build_facts() ──> QuipFacts        (pure data extraction)
-              pick_quip()   ──> ResolvedQuip     (tier match + RNG pick +
-                                                  placeholder interpolation)
-                    │
-quip_render.py renderer.render() ──> str         (pluggable presentation)
+cli.py           upstream: seed → rng → layout pick, language, exit code
+  │
+quip_layout.py   layouts: frame and decorate the core text
+  │
+quip_copy.py     core text: the copy, one registration per level and language
+  │
+term.py          terminal text: ANSI, display width, frame padding, art
 ```
 
-Three separable concerns:
+| Module | Job |
+|---|---|
+| `term.py` | Display width, padding, ANSI colour, the digit font and dot glyph. Emits colour unconditionally; stripping is the caller's business. |
+| `quip_copy.py` | Pure data: `text_model(...)` calls and nothing else. |
+| `quip_layout.py` | The `certificate` and `bignum` layouts, and everything decorative they own. |
+| `quip.py` | The two registries, the tier table, and the pairing between models and layouts. |
 
-1. **Facts** (`QuipFacts`) — everything copy is allowed to reference: count, total bytes, per-family counts, largest runtime, dot parade pieces, and the localized units of disk waste (Doom copies for English, Super Mario Bros copies for Chinese, floppies as an alternate).
-2. **Copy** (`TIERS`, `SPECIAL_QUIPS` in `quips.py`) — pure data. Tiers are threshold-matched on count; each tier carries severity (0–1), a color mood, a stage label, and a pool of interchangeable copy entries per language. Special exact counts (42, 404, 418) override the pool of their severity tier. Editing copy means editing this data only.
-3. **Renderers** (`quip_render.py`) — anything satisfying the `QuipRenderer` protocol can be registered in `RENDERERS` and selected via `--quip-style`.
+## Text models
 
-## Tone curve
+A text model is one `text_model(...)` registration. `essence` is mandatory — it is the baseline every layout may rely on. Every other keyword is a **capability**: its name is the keyword, its value a template string or a callable taking `Facts`.
 
-| Count | Mood | zh voice | en voice |
-|---|---|---|---|
-| 0 | Reverence | 纯净得像刚出厂 | state of grace |
-| 1 | Museum piece | 数字极简主义活化石 | we've contacted the museum |
-| 2 | Foreshadowing | 深渊正在凝视你 | we're watching |
-| 3–4 | First signs | 它们开始自发繁殖了 | they have started reproducing |
-| 5–9 | Starter pack | 新手礼包领取成功 | gotta catch 'em all |
-| 10–24 | Clinical concern | 硬盘有了自己的想法 | stable, but contagious |
-| 25–49 | Fake celebration | 喜报！你在集邮 | Good news, everyone! |
-| 50–69 | Intervention | 已预约戒断互助小组 | we've scheduled an intervention |
-| 70+ | Black humor | Chromium 批发市场 | Chromium hosting facility |
+```python
+text_model("zh", tier="collector",
+    essence="喜报！ {count} 个内核。你不是在装软件，是在集邮。",
+    diagnosis="晚期 Chromium 囤积症",
+    prognosis="具有收藏价值",
+    stage="第三期",
+    closing="它们趁你不注意时繁殖。")
+```
 
-A tier that spans more than one count may not contain literal digits in its copy — `validate_copy()` rejects that, so "2 instances" cannot silently lie when the tier also covers 3 and 4. Use `{count}` (or a wording without a number). Single-count tiers are free to spell the number out.
+A level spans a count range (`tier=`) or one exact count (`count=42`). Registration derives the tier from an exact count, so the 42/404/418 specials only need the number.
 
-Chinese copy uses the 喜报 (jubilant announcement) register; English uses Futurama's "Good news, everyone!" — both deliver bad news in a celebratory form. The two languages are independently written, not translated.
+## Layouts
 
-## Renderers
+A layout is one `@layout` registration that declares the capabilities it needs beyond the baseline:
 
-The renderer is chosen per run: `auto` (the default) draws one from the same seeded RNG as the copy, so repeated scans vary while `--quip-seed` stays reproducible.
+```python
+@layout("certificate", requires={"diagnosis", "prognosis", "stage", "closing"})
+def certificate(values, facts): ...
+```
 
-### certificate (default)
+It receives the model's already-interpolated values plus the runtime `Facts` (count, size, language) and returns the finished block. Layouts own everything that is not copy: the frame, the severity bar, the dot parade, the unit conversions, the art.
 
-A mock-official "Chromium Diagnostic Certificate" box: patient, count, diagnosis, animated severity bar with stage, disk waste in localized units, prognosis, and certification by Dr. Electron, PhD in RAM Consumption. Above the box, a parade of `(◉)` dots (capped at 20, remainder summarized).
+## Selection
+
+1. Count → tier, or an exact-count registration when one exists (42, 404, 418 win over the tier).
+2. Pick a text model for that tier and language at random.
+3. Narrow the layouts to those the model can serve (`requires <= provides`), then pick one at random — unless `--quip-style` forces one, in which case the model pool is narrowed to models that can serve it.
+4. Render, then strip colour if the stream wants none.
+
+The RNG is the one the CLI seeded, so `--quip-seed` reproduces the layout pick and the fabricated-size jitter together.
+
+Two properties keep this honest, and both are tested:
+
+- The baseline `essence` guarantees the pairing is never empty, because a layout requiring only the baseline is compatible with every model. `bignum` is that layout.
+- Every level has a model for every layout in both languages, so a forced `--quip-style` never hits an incompatible model.
+
+## Adding copy, a capability, or a layout
+
+- **Another joke for a level**: one more `text_model(...)` call with a different `essence`, same tier and language. The model pick is random, so both get used.
+- **A new capability**: one more keyword on the registrations that should provide it. No other model grows, and no schema changes — this is the whole reason capabilities live in the registry rather than in a shared record type.
+- **A new layout**: one `@layout` decorator with its `requires`. It pairs only with models that offer them. If you want it forceable with `--quip-style`, make sure at least one model per level and language provides the capability; a test enforces this.
+- **A new level**: one `Tier(...)` in `TIERS`, models for both languages, and an entry in the width test's expectations. Thresholds must keep ascending from zero.
+
+## Writing rules
+
+Layouts never wrap. Anything that lands inside the certificate frame must fit **56 display columns**, counting a CJK character as two. A test formats every framed string at the widest count its level can see and fails on overflow. A level that spans more than one count must not spell a number out; use `{count}`. An exact-count special may.
+
+The rules are deliberately cheap to satisfy: `{count}` in a framed string caps the level's usable width, so unbounded levels (70+) are written without it.
+
+## The two layouts
+
+### certificate
+
+A mock-official box. Above it, the dot parade (capped at 20, with the remainder summarised). Inside, in order: the essence, the count, the diagnosis, a severity bar with the stage, an optional disk conversion, the prognosis, and a signature. Below the box, the closing line.
+
+The disk conversion is the layout's own decoration, not a fact the text model knows about: English compares the payload to Doom (1993), Chinese to Super Mario Bros cartridges. It is omitted when there is no payload.
 
 ### bignum
 
-The instance count in giant ANSI Shadow block digits (each glyph 9 columns wide) with a subtitle line of facts.
+The count in ANSI Shadow block digits, with the language's unit label beside the middle row, captioned by the essence and closed by the closing line. It requires nothing beyond the baseline, which is what makes it the always-compatible layout.
 
-Note on width: these glyphs use East Asian Ambiguous characters (`█`, `╗`, `═`). Whether a terminal renders those one or two cells wide is a terminal setting, not something a locale reliably predicts; kitty, for instance, keeps them narrow even under `LC_ALL=zh_CN.UTF-8` (verified by cursor-position measurement). The renderer therefore always uses the outlined font and assumes the same ambiguous-is-narrow convention as the certificate box. Per-character rainbow coloring is unaffected by glyph width because ANSI codes are zero-width.
+Both fonts use East Asian Ambiguous characters (`█`, `╗`, `═`). Whether a terminal renders those one or two cells wide is a terminal setting, not something a locale reliably predicts; kitty, for instance, keeps them narrow even under `LC_ALL=zh_CN.UTF-8`. The measuring functions therefore assume the same ambiguous-is-narrow convention the frames are drawn with. Per-character rainbow colouring is unaffected by glyph width because ANSI codes are zero-width.
 
-## Color discipline
+## Colour
 
-- Colors only on a TTY, and never when `NO_COLOR` is set (silent) or `--no-color` is passed (with a "Coward." jab).
-- Severity color ramps green → yellow → red → blink → rainbow with the tiers.
+Layouts always emit ANSI. The CLI decides whether to keep it: `terminal_supports_color()` (a TTY, and no `NO_COLOR`) combined with `--no-color`. When colour is off, the boundary strips every escape with `term.strip_ansi`.
 
-## Adding copy or a renderer
-
-- New copy: add entries to the tier pool in `quips.py`. Any `{placeholder}` must exist on `QuipFacts`; `validate_copy()` (run by the test suite) checks placeholders, language/tier coverage, and rejects literal digits in multi-count tiers.
-- New special count: add to `_SPECIAL_POOLS` + `SPECIAL_QUIPS`.
-- New renderer: implement `QuipRenderer`, register in `RENDERERS`. The `--quip-style` choices pick it up automatically.
+`--no-color` and `NO_COLOR` differ in tone only: the explicit flag prints a "Coward." jab, the environment variable does not.
 
 ## Tests
 
-- `tests/test_quips.py` — facts, tier boundaries, specials, RNG reproducibility, copy validation (including the hardcoded-digit guard).
-- `tests/test_quip_render.py` — box border alignment in both languages (wide-char aware), digit-font integrity (uniform glyph widths), dot parade cap, both renderers, color/no-color.
-- `tests/test_quip_cli.py` — flag wiring, `--quip`/`--json` rejection, exit code, locale resolution, style randomization, the `--no-color` jab.
+- `tests/test_quip.py` — tier table, language and layout coverage, frame-width invariants, the essence appearing in every layout, exact-count overrides, seeded reproducibility, registration errors.
+- `tests/test_quip_layout.py` — frame alignment in both languages, the dot cap, digit-font integrity, colour and stripping.
+- `tests/test_quip_cli.py` — flag wiring, `--quip`/`--json` rejection, exit code, locale resolution, layout randomisation, the `--no-color` jab.

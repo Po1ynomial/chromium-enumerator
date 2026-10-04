@@ -47,10 +47,10 @@ See [quips.md](quips.md) for the full design. Summary of the flags:
 |---|---|---|
 | `--quip` | off | Replace the report with a playful summary. Mutually exclusive with `--json`. Exit code becomes the instance count, capped at 255. |
 | `--lang {auto,zh,en}` | `auto` | Quip language. `auto` reads `LC_ALL`, `LC_MESSAGES`, `LANG`; `zh*` gets Chinese, otherwise English. |
-| `--quip-seed N` | random | Fix the RNG seed, reproducing both the copy and the presentation style. |
-| `--quip-style {auto,certificate,bignum}` | `auto` | Presentation style. `auto` draws a renderer from the seeded RNG. |
+| `--quip-seed N` | random | Fix the RNG seed, reproducing the layout pick and the estimated payload size. |
+| `--quip-style {auto,certificate,bignum}` | `auto` | Layout. `auto` picks one at random from the layouts the chosen text model can serve. |
 | `--no-color` | off | Disable ANSI colors and print a jab. `NO_COLOR` and non-TTY output degrade silently instead. |
-| `--quip-count N` | unset | Skip scanning entirely and render the quip for a fabricated machine with `N` instances. Requires `--quip`; rejected with `--verbose`; must be non-negative. |
+| `--quip-count N` | unset | Skip scanning entirely and render the quip for `N` instances; the payload size is estimated. Requires `--quip`; rejected with `--verbose`; must be non-negative. |
 
 Argument-combination errors are reported by argparse with exit status 2, using these exact messages:
 

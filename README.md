@@ -123,8 +123,10 @@ chromium-enumerator/
 │   ├── registry.py     # Windows installed-software records
 │   ├── pe_metadata.py  # Windows PE version-resource metadata
 │   ├── model.py        # dataclasses for evidence and results
-│   ├── quips.py        # quip facts, tone tiers, and localized copy pools
-│   ├── quip_render.py  # pluggable quip renderers (certificate, bignum)
+│   ├── quip.py         # quip registry: tiers, text models, layouts, pairing
+│   ├── quip_copy.py    # the copy as data: one registration per level and language
+│   ├── quip_layout.py  # the certificate and bignum layouts
+│   ├── term.py         # terminal primitives: width, padding, ANSI colour, art
 │   └── scanner.py      # walking, grouping, scoring, metadata, sizes
 ├── tests/              # pytest suite with synthetic macOS and Windows layouts
 └── docs/               # detection.md, cli.md, architecture.md, quips.md
