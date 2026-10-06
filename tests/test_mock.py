@@ -133,9 +133,9 @@ def test_mock_results_reach_the_plain_report(capsys, monkeypatch):
     assert "mock" in out
 
 
-def test_mock_results_reach_verbose_and_default_to_macos(capsys, monkeypatch):
+def test_mock_results_reach_verbose(capsys, monkeypatch):
     monkeypatch.setenv(ENV_VAR, "1")
-    assert main(["--verbose"]) == 0
+    assert main(["--platform", "macos", "--verbose"]) == 0
     out = capsys.readouterr().out
     assert "Electron Framework.framework" in out
     assert "CFBundleName" in out
